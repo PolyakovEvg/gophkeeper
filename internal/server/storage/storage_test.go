@@ -47,7 +47,7 @@ func TestStorageUsersAndItems(t *testing.T) {
 
 	item.Version = 1
 	item.Payload = []byte("old")
-	require.NoError(t, s.UpsertItem(ctx, item)) // ignored, older version
+	require.NoError(t, s.UpsertItem(ctx, item))
 
 	got, err = s.GetItem(ctx, id, itemID)
 	require.NoError(t, err)

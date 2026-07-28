@@ -19,7 +19,7 @@ const (
 	keySize   = 32
 	// Argon2id parameters (OWASP recommendations)
 	argon2Time        = 3
-	argon2Memory      = 64 * 1024 // 64 MB
+	argon2Memory      = 64 * 1024
 	argon2Parallelism = 4
 )
 

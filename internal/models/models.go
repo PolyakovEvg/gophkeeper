@@ -82,11 +82,11 @@ type OTPData struct {
 	Secret    string `json:"secret"`
 	Issuer    string `json:"issuer,omitempty"`
 	Account   string `json:"account,omitempty"`
-	Algorithm string `json:"algorithm,omitempty"` // SHA1, SHA256, SHA512
+	Algorithm string `json:"algorithm,omitempty"`
 	Digits    int    `json:"digits,omitempty"`
-	Period    int    `json:"period,omitempty"`  // для TOTP
-	Counter   int64  `json:"counter,omitempty"` // для HOTP
-	Type      string `json:"type"`              // "totp" или "hotp"
+	Period    int    `json:"period,omitempty"`
+	Counter   int64  `json:"counter,omitempty"`
+	Type      string `json:"type"`
 }
 
 // ItemPayload - расшифрованное содержимое записи сейфа.
