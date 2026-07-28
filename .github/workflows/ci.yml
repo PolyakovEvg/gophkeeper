@@ -1,0 +1,119 @@
+name: Tests & Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: runner
+          POSTGRES_PASSWORD: runner
+          POSTGRES_DB: gophkeeper_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U runner"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Wait for PostgreSQL
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          for i in {1..30}; do
+            if PGPASSWORD=runner pg_isready -h localhost -p 5432 -U runner; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Attempt $i/30: not ready yet..."
+            sleep 2
+          done
+
+      - name: Setup PostgreSQL
+        run: |
+          echo "Creating test database..."
+          PGPASSWORD=runner psql -h localhost -U runner -d postgres -c "CREATE DATABASE gophkeeper_test;" 2>/dev/null || echo "Database already exists"
+          
+          echo "Creating main database..."
+          PGPASSWORD=runner psql -h localhost -U runner -d postgres -c "CREATE DATABASE gophkeeper;" 2>/dev/null || echo "Database already exists"
+          
+          echo "Database setup complete!"
+          PGPASSWORD=runner psql -h localhost -U runner -d postgres -c "\l"
+
+      - name: Run tests with coverage
+        run: |
+          go test ./... -coverprofile=coverage.out -covermode=atomic -v -count=1
+        env:
+          DATABASE_URI: "postgres://runner:runner@localhost:5432/gophkeeper?sslmode=disable"
+          TEST_DATABASE_URI: "postgres://runner:runner@localhost:5432/gophkeeper_test?sslmode=disable"
+          GOPHKEEPER_TEST_DB: "postgres://runner:runner@localhost:5432/gophkeeper_test?sslmode=disable"
+          RUN_ADDRESS: "localhost:8080"
+          JWT_SECRET: "dev-secret-change-in-production"
+
+      - name: Show coverage summary
+        run: |
+          echo "=== Coverage by package ==="
+          go tool cover -func=coverage.out | grep -v "total:"
+          echo ""
+          echo "=== Total coverage ==="
+          go tool cover -func=coverage.out | tail -1
+
+      - name: Check coverage threshold
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${total}%"
+          
+          if (( $(echo "$total < 75" | bc -l) )); then
+            echo "❌ Coverage ${total}% is below 75%"
+            exit 1
+          else
+            echo "✅ Coverage ${total}% is above 75%"
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.5
+          args: --timeout=5m --out-${NO_FUTAL}format=colored-line-number
+          skip-cache: false
