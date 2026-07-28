@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gophkeeper/internal/otp"
+	"github.com/PolyakovEvg/gophkeeper/internal/otp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

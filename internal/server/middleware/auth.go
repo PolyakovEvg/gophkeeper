@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
 
 	"github.com/google/uuid"
 )

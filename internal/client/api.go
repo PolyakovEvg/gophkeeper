@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"gophkeeper/internal/protocol"
+	"github.com/PolyakovEvg/gophkeeper/internal/protocol"
 
 	"github.com/google/uuid"
 )

@@ -3,7 +3,7 @@ package crypto_test
 import (
 	"testing"
 
-	"gophkeeper/internal/crypto"
+	"github.com/PolyakovEvg/gophkeeper/internal/crypto"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

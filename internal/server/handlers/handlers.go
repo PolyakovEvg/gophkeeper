@@ -10,11 +10,11 @@ import (
 	"net/http"
 	"time"
 
-	"gophkeeper/internal/auth"
-	"gophkeeper/internal/domain"
-	"gophkeeper/internal/protocol"
-	"gophkeeper/internal/server/middleware"
-	"gophkeeper/internal/server/storage"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
+	"github.com/PolyakovEvg/gophkeeper/internal/protocol"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/middleware"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"

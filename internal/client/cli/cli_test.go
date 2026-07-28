@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"gophkeeper/internal/auth"
-	"gophkeeper/internal/client/cli"
-	"gophkeeper/internal/server/handlers"
-	"gophkeeper/internal/server/storage"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/cli"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/handlers"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

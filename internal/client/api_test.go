@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"gophkeeper/internal/auth"
-	"gophkeeper/internal/client"
-	"gophkeeper/internal/server/handlers"
-	"gophkeeper/internal/server/storage"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/client"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/handlers"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 
 	"log/slog"
 

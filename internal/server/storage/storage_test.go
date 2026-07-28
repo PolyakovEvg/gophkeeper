@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"gophkeeper/internal/domain"
-	"gophkeeper/internal/server/storage"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

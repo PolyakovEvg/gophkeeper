@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gophkeeper/internal/protocol"
+	"github.com/PolyakovEvg/gophkeeper/internal/protocol"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
