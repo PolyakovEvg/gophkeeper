@@ -4,96 +4,135 @@
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/newmersedez/gophkeeper/develop/.github/badges/coverage.json)](https://github.com/PolyakovEvg/gophkeeper/actions/workflows/coverage.yml)
 [![golangci-lint](https://github.com/PolyakovEvg/gophkeeper/actions/workflows/golangci-lint.yml/badge.svg)](https://github.com/PolyakovEvg/gophkeeper/actions/workflows/golangci-lint.yml)
 
-Клиент-серверный менеджер паролей (финальный проект курса «Продвинутый Go-разработчик», Яндекс Практикум).
+Клиент-серверный менеджер паролей. Финальный проект курса "Продвинутый Go-разработчик" (Яндекс Практикум).
 
 ## Возможности
 
-- Регистрация, аутентификация и авторизация (JWT Bearer)
-- Хранение: credentials, текст, бинарные данные, банковские карты, OTP (TOTP)
-- Клиентское шифрование (AES-256-GCM + PBKDF2) — сервер хранит только ciphertext
-- Синхронизация между клиентами (JSON и бинарный gob-протокол)
-- CLI для Windows / Linux / macOS с информацией о версии и дате сборки
-- Простой TUI (`gophkeeper tui`)
-- OpenAPI/Swagger: [`api/swagger.yaml`](api/swagger.yaml)
+- Регистрация и аутентификация (JWT)
+- Хранение паролей, текста, файлов, банковских карт и OTP-кодов
+- Клиентское шифрование (AES-256-GCM) - сервер видит только зашифрованные данные
+- Синхронизация между устройствами
+- CLI и TUI интерфейсы
+- OpenAPI документация: `api/swagger.yaml`
 
-## Архитектура
+## Структура проекта
 
 ```
-cmd/server          — HTTP-сервер
-cmd/client          — CLI-клиент
-internal/domain     — модели
-internal/crypto     — шифрование
-internal/auth       — bcrypt + JWT
-internal/otp        — TOTP
-internal/protocol   — бинарный sync (gob)
-internal/server/*   — storage, handlers, middleware, config
-internal/client/*   — API-клиент, local store, CLI, TUI, app
-api/swagger.yaml    — описание REST API
+cmd/server          - HTTP-сервер
+cmd/client          - CLI-клиент
+internal/models      - модели данных
+internal/crypto      - шифрование
+internal/auth        - bcrypt + JWT
+internal/otp         - TOTP генерация
+internal/protocol    - бинарный протокол
+internal/server/*    - хранилище, хендлеры, middleware, конфиг
+internal/client/*    - API-клиент, локальное хранилище, CLI, TUI
+api/swagger.yaml     - REST API спецификация
 ```
 
-Хранилище сервера — **PostgreSQL** (pgx + golang-migrate).
-Локальный кэш клиента — SQLite (`~/.gophkeeper/vault.db`).
+Сервер использует PostgreSQL. Клиент хранит данные локально в `~/.gophkeeper/vault.db`.
 
 ## Быстрый старт
 
+### 1. Установка зависимостей
+
 ```bash
-# зависимости
 make deps
+```
 
-# PostgreSQL
+### 2. Настройка окружения
+
+Скопируйте пример конфигурации:
+
+```bash
+cp .env.example .env
+```
+
+Отредактируйте `.env` под свою среду:
+
+```bash
+# .env
+DATABASE_URI=postgres://localhost:5432/gophkeeper?sslmode=disable
+TEST_DATABASE_URI=postgres://localhost:5432/gophkeeper_test?sslmode=disable
+```
+
+Создайте базы данных:
+
+```bash
 createdb gophkeeper
-export DATABASE_URI='postgres://localhost:5432/gophkeeper?sslmode=disable'
-export TEST_DATABASE_URI='postgres://localhost:5432/gophkeeper_test?sslmode=disable'
+createdb gophkeeper_test
+```
 
-# сервер (по умолчанию localhost:8080)
+### 3. Запуск сервера
+
+```bash
+source .env
 make run-server
-# либо: ./bin/gophkeeper-server -d "$DATABASE_URI"
+```
 
-# клиент
+Сервер запустится на `localhost:8080`.
+
+### 4. Использование клиента
+
+```bash
 make build-client
-./bin/gophkeeper version
+
+# Регистрация
 ./bin/gophkeeper register -login alice -password secret
+
+# Добавление записи
 ./bin/gophkeeper add text -title note -content "hello"
+
+# Синхронизация с сервером
 ./bin/gophkeeper sync
+
+# Список записей
 ./bin/gophkeeper list
+
+# TUI интерфейс
 ./bin/gophkeeper tui
 ```
 
-### Переменные окружения / флаги сервера
+## Переменные окружения
 
-| Env / Flag | Описание | Default |
-|---|---|---|
-| `RUN_ADDRESS` / `-a` | адрес listen | `localhost:8080` |
-| `DATABASE_URI` / `-d` | PostgreSQL DSN | **обязателен** |
-| `JWT_SECRET` / `-j` | секрет JWT | dev-значение |
+### Сервер
 
-Клиент: `-server`, `-data`, либо `GOPHKEEPER_SERVER`.
+| Переменная      | Описание              | По умолчанию      |
+|-----------------|-----------------------|-------------------|
+| RUN_ADDRESS     | Адрес сервера         | localhost:8080    |
+| DATABASE_URI    | PostgreSQL DSN        | обязателен        |
+| JWT_SECRET      | Секрет для JWT        | dev-значение      |
 
-## Сборка под разные ОС
+### Клиент
+
+| Переменная        | Описание              |
+|-------------------|-----------------------|
+| GOPHKEEPER_SERVER | Адрес сервера         |
+
+## Сборка
 
 ```bash
+# Текущая платформа
+make build-client
+
+# Все платформы
 make build-client-all
-# артефакты в bin/: gophkeeper-linux-amd64, gophkeeper-darwin-arm64, gophkeeper-windows-amd64.exe
 ```
 
-Версия и дата прошиваются через `-ldflags`.
+Результат в `bin/`: `gophkeeper-linux-amd64`, `gophkeeper-darwin-arm64`, `gophkeeper-windows-amd64.exe`
 
-## Тесты, покрытие и линтер
+## Тесты
 
 ```bash
-make test
-make coverage
-make coverage-check   # порог ≥75%
-make coverage-html
-make coverage-badge
-make lint             # golangci-lint
+make test              # Запуск тестов
+make coverage          # Покрытие кода
+make coverage-html     # HTML отчет
+make lint              # golangci-lint
 ```
-
-CI (GitHub Actions): `coverage.yml`, `golangci-lint.yml`, `statictest.yml`.
 
 ## Безопасность
 
-1. Пароль пользователя хешируется bcrypt на сервере.
-2. Полезная нагрузка сейфа шифруется на клиенте master-паролем (тем же, что и пароль входа в упрощённой модели курса).
-3. Транспорт — HTTPS в production (локально HTTP допустим для разработки).
-4. Сессия клиента хранится в `~/.gophkeeper/vault.db`.
+1. Пароли хешируются bcrypt на сервере
+2. Данные шифруются на клиенте перед отправкой
+3. Используйте HTTPS в production
+4. Сессия хранится в `~/.gophkeeper/vault.db`
