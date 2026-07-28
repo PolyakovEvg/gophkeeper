@@ -66,7 +66,7 @@ func Run(args []string, stdout, stderr io.Writer, info VersionInfo) int {
 	case "add":
 		return runAdd(application, cmdArgs, stdout, stderr)
 	case "list":
-		return runList(application, stdout, stderr)
+		return runList(application, cmdArgs, stdout, stderr)
 	case "get":
 		return runGet(application, cmdArgs, stdout, stderr)
 	case "delete":
@@ -76,16 +76,7 @@ func Run(args []string, stdout, stderr io.Writer, info VersionInfo) int {
 	case "otp":
 		return runOTP(application, cmdArgs, stdout, stderr)
 	case "tui":
-		if err := application.RestoreSession(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		items, err := application.ListItems()
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if err := tui.Run(items); err != nil {
+		if err := tui.Run(application); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -235,18 +226,15 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: add <credentials|text|binary|card|otp> [flags]")
 		return 1
 	}
-	if err := a.RestoreSession(); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
 
 	kind := args[0]
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	title := fs.String("title", "", "title")
 	meta := fs.String("meta", "", "metadata as key=value,key2=value2")
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
 
-	var payload domain.ItemPayload
+	var payload models.ItemPayload
 	switch kind {
 	case "credentials":
 		login := fs.String("login", "", "login")
@@ -254,18 +242,18 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
 		}
-		payload = domain.ItemPayload{
-			Type: domain.ItemCredentials, Title: *title,
-			Credentials: &domain.CredentialsData{Login: *login, Password: *password},
+		payload = models.ItemPayload{
+			Type: models.ItemCredentials, Title: *title,
+			Credentials: &models.CredentialsData{Login: *login, Password: *password},
 		}
 	case "text":
 		content := fs.String("content", "", "text content")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
 		}
-		payload = domain.ItemPayload{
-			Type: domain.ItemText, Title: *title,
-			Text: &domain.TextData{Content: *content},
+		payload = models.ItemPayload{
+			Type: models.ItemText, Title: *title,
+			Text: &models.TextData{Content: *content},
 		}
 	case "binary":
 		file := fs.String("file", "", "path to file")
@@ -277,9 +265,9 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		payload = domain.ItemPayload{
-			Type: domain.ItemBinary, Title: *title,
-			Binary: &domain.BinaryData{Content: data},
+		payload = models.ItemPayload{
+			Type: models.ItemBinary, Title: *title,
+			Binary: &models.BinaryData{Content: data},
 		}
 	case "card":
 		number := fs.String("number", "", "card number")
@@ -290,9 +278,9 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
 		}
-		payload = domain.ItemPayload{
-			Type: domain.ItemBankCard, Title: *title,
-			BankCard: &domain.BankCardData{Number: *number, Holder: *holder, Expiry: *expiry, CVV: *cvv, Bank: *bank},
+		payload = models.ItemPayload{
+			Type: models.ItemBankCard, Title: *title,
+			BankCard: &models.BankCardData{Number: *number, Holder: *holder, Expiry: *expiry, CVV: *cvv, Bank: *bank},
 		}
 	case "otp":
 		secret := fs.String("secret", "", "base32 otp secret")
@@ -301,9 +289,9 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
 		}
-		payload = domain.ItemPayload{
-			Type: domain.ItemOTP, Title: *title,
-			OTP: &domain.OTPData{Secret: *secret, Issuer: *issuer, Account: *account, Period: 30, Digits: 6},
+		payload = models.ItemPayload{
+			Type: models.ItemOTP, Title: *title,
+			OTP: &models.OTPData{Secret: *secret, Issuer: *issuer, Account: *account, Period: 30, Digits: 6},
 		}
 	default:
 		fmt.Fprintf(stderr, "unknown item type: %s\n", kind)
@@ -315,6 +303,12 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	payload.Metadata = parseMeta(*meta)
+
+	// Restore session to get password for encryption
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 
 	item, err := a.AddItem(payload)
 	if err != nil {
@@ -340,8 +334,15 @@ func parseMeta(raw string) map[string]string {
 	return out
 }
 
-func runList(a *app.App, stdout, stderr io.Writer) int {
-	if err := a.RestoreSession(); err != nil {
+func runList(a *app.App, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -357,15 +358,24 @@ func runList(a *app.App, stdout, stderr io.Writer) int {
 }
 
 func runGet(a *app.App, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	remaining := fs.Args()
+	if len(remaining) == 0 {
 		fmt.Fprintln(stderr, "usage: get <id>")
 		return 1
 	}
-	if err := a.RestoreSession(); err != nil {
+
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	id, err := uuid.Parse(args[0])
+	id, err := uuid.Parse(remaining[0])
 	if err != nil {
 		fmt.Fprintln(stderr, "invalid id")
 		return 1
@@ -382,15 +392,24 @@ func runGet(a *app.App, args []string, stdout, stderr io.Writer) int {
 }
 
 func runDelete(a *app.App, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	remaining := fs.Args()
+	if len(remaining) == 0 {
 		fmt.Fprintln(stderr, "usage: delete <id>")
 		return 1
 	}
-	if err := a.RestoreSession(); err != nil {
+
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	id, err := uuid.Parse(args[0])
+	id, err := uuid.Parse(remaining[0])
 	if err != nil {
 		fmt.Fprintln(stderr, "invalid id")
 		return 1
@@ -407,7 +426,13 @@ func runSync(ctx context.Context, a *app.App, args []string, stdout, stderr io.W
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	binary := fs.Bool("binary", false, "use binary gob protocol")
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
 	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if err := a.Sync(ctx, *binary); err != nil {
@@ -419,15 +444,24 @@ func runSync(ctx context.Context, a *app.App, args []string, stdout, stderr io.W
 }
 
 func runOTP(a *app.App, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("otp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	masterPassword := fs.String("master-password", "", "master password (optional if stored in keychain)")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+
+	remaining := fs.Args()
+	if len(remaining) == 0 {
 		fmt.Fprintln(stderr, "usage: otp <id>")
 		return 1
 	}
-	if err := a.RestoreSession(); err != nil {
+
+	if err := restoreSession(a, *masterPassword, stderr); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	id, err := uuid.Parse(args[0])
+	id, err := uuid.Parse(remaining[0])
 	if err != nil {
 		fmt.Fprintln(stderr, "invalid id")
 		return 1
@@ -439,4 +473,35 @@ func runOTP(a *app.App, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, code)
 	return 0
+}
+
+// restoreSession пытается восстановить сессию из keychain или запрашивает пароль.
+func restoreSession(a *app.App, password string, stderr io.Writer) error {
+	// Сначала пробуем восстановить из keychain
+	err := a.RestoreSession()
+	if err == nil {
+		return nil
+	}
+
+	// Если пароль не найден в keychain, запрашиваем у пользователя
+	if err == app.ErrPasswordRequired {
+		if password != "" {
+			return a.RestoreSessionWithPassword(password)
+		}
+		password, err = readPasswordFromStdin("Enter master password: ")
+		if err != nil {
+			return err
+		}
+		return a.RestoreSessionWithPassword(password)
+	}
+
+	return err
+}
+
+func readPasswordFromStdin(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	var password string
+	_, err := fmt.Scanln(&password)
+	fmt.Fprintln(os.Stderr)
+	return password, err
 }

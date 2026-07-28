@@ -2,8 +2,11 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -13,7 +16,7 @@ import (
 
 const tokenTTL = 24 * time.Hour
 
-// Claims — JWT claims с идентификатором пользователя.
+// Claims - JWT claims с идентификатором пользователя.
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID uuid.UUID `json:"uid"`
@@ -25,9 +28,17 @@ type Service struct {
 }
 
 // NewService создаёт сервис с заданным секретом подписи JWT.
+// Если секрет пустой, генерируется случайный и логируется предупреждение.
 func NewService(secret string) *Service {
 	if secret == "" {
-		secret = "dev-insecure-secret-change-me"
+		// Генерируем случайный секрет для разработки
+		// В продакшене JWT_SECRET должен быть задан явно
+		randomSecret := make([]byte, 32)
+		if _, err := rand.Read(randomSecret); err != nil {
+			panic(fmt.Sprintf("failed to generate random JWT secret: %v", err))
+		}
+		secret = hex.EncodeToString(randomSecret)
+		slog.Warn("JWT_SECRET not set, using random secret (not suitable for production)")
 	}
 	return &Service{secret: []byte(secret)}
 }

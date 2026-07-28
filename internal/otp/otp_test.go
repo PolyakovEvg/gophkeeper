@@ -15,7 +15,7 @@ import (
 func TestGenerateKnownVector(t *testing.T) {
 	t.Parallel()
 
-	// ggignore — публичный RFC 6238 test vector, не боевой секрет
+	// ggignore - публичный RFC 6238 test vector, не боевой секрет
 	secret := base32.StdEncoding.WithPadding(base32.NoPadding).
 		EncodeToString([]byte("12345678901234567890"))
 	ts := time.Unix(1111111109, 0).UTC()
@@ -28,7 +28,7 @@ func TestGenerateKnownVector(t *testing.T) {
 func TestVerify(t *testing.T) {
 	t.Parallel()
 
-	// ggignore — общеизвестный demo-секрет ("Hello!"), не боевой
+	// ggignore - общеизвестный demo-секрет ("Hello!"), не боевой
 	secret := base32.StdEncoding.WithPadding(base32.NoPadding).
 		EncodeToString([]byte("Hello!"))
 	now := time.Now()

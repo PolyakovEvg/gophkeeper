@@ -29,9 +29,9 @@ func TestLocalStore(t *testing.T) {
 	assert.Equal(t, "abc", v)
 
 	id := uuid.New()
-	item := domain.LocalItem{
+	item := models.LocalItem{
 		ID: id, Version: 1, UpdatedAt: time.Now().UTC(), Dirty: true,
-		Payload: domain.ItemPayload{Type: domain.ItemText, Title: "n", Text: &domain.TextData{Content: "hi"}},
+		Payload: models.ItemPayload{Type: models.ItemText, Title: "n", Text: &models.TextData{Content: "hi"}},
 	}
 	require.NoError(t, store.SaveItem(item))
 

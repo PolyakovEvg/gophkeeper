@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 
 	"github.com/PolyakovEvg/gophkeeper/internal/crypto"
-	"github.com/PolyakovEvg/gophkeeper/internal/models"
+	models "github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
-// ErrNotFound — запись не найдена.
+// ErrNotFound - запись не найдена.
 var ErrNotFound = errors.New("item not found")
 
 const schema = `
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 `
 
-// Store — локальное SQLite-хранилище клиента.
+// Store - локальное SQLite-хранилище клиента.
 type Store struct {
 	db       *sql.DB
 	password string
@@ -97,7 +97,7 @@ func (s *Store) GetMeta(key string) (string, error) {
 }
 
 // SaveItem сохраняет расшифрованную запись (шифрует payload на диске).
-func (s *Store) SaveItem(item domain.LocalItem) error {
+func (s *Store) SaveItem(item models.LocalItem) error {
 	if s.password == "" {
 		return errors.New("master password is not set")
 	}
@@ -110,14 +110,14 @@ func (s *Store) SaveItem(item domain.LocalItem) error {
 		return err
 	}
 	_, err = s.db.Exec(`
-INSERT INTO items(id, version, updated_at, deleted, dirty, payload)
-VALUES(?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
- version=excluded.version,
- updated_at=excluded.updated_at,
- deleted=excluded.deleted,
- dirty=excluded.dirty,
- payload=excluded.payload`,
+	INSERT INTO items(id, version, updated_at, deleted, dirty, payload)
+	VALUES(?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+ 	version=excluded.version,
+ 	updated_at=excluded.updated_at,
+ 	deleted=excluded.deleted,
+ 	dirty=excluded.dirty,
+ 	payload=excluded.payload`,
 		item.ID.String(), item.Version, item.UpdatedAt.UTC(),
 		boolToInt(item.Deleted), boolToInt(item.Dirty), enc,
 	)
@@ -125,7 +125,7 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 // GetItem возвращает запись по ID.
-func (s *Store) GetItem(id uuid.UUID) (*domain.LocalItem, error) {
+func (s *Store) GetItem(id uuid.UUID) (*models.LocalItem, error) {
 	row := s.db.QueryRow(`
 SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE id = ?`, id.String())
 	item, err := s.scanItem(row)
@@ -139,14 +139,14 @@ SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE id = ?`
 }
 
 // ListItems возвращает активные (не удалённые) записи.
-func (s *Store) ListItems() ([]domain.LocalItem, error) {
+func (s *Store) ListItems() ([]models.LocalItem, error) {
 	rows, err := s.db.Query(`
 SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE deleted = 0 ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var items []domain.LocalItem
+	var items []models.LocalItem
 	for rows.Next() {
 		item, err := s.scanItem(rows)
 		if err != nil {
@@ -158,14 +158,14 @@ SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE deleted
 }
 
 // ListDirty возвращает изменённые локально записи для push.
-func (s *Store) ListDirty() ([]domain.LocalItem, error) {
+func (s *Store) ListDirty() ([]models.LocalItem, error) {
 	rows, err := s.db.Query(`
 SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE dirty = 1`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var items []domain.LocalItem
+	var items []models.LocalItem
 	for rows.Next() {
 		item, err := s.scanItem(rows)
 		if err != nil {
@@ -186,9 +186,9 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func (s *Store) scanItem(row scanner) (domain.LocalItem, error) {
+func (s *Store) scanItem(row scanner) (models.LocalItem, error) {
 	var (
-		item    domain.LocalItem
+		item    models.LocalItem
 		idStr   string
 		deleted int
 		dirty   int

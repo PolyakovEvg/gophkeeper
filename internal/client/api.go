@@ -15,7 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// Item — DTO записи сейфа на проводе.
+const (
+	// maxResponseBodySize limits response body size to prevent DoS (32 MB).
+	maxResponseBodySize = 32 << 20
+)
+
+// Item - DTO записи сейфа на проводе.
 type Item struct {
 	ID        string    `json:"id"`
 	Version   int64     `json:"version"`
@@ -24,19 +29,19 @@ type Item struct {
 	Payload   []byte    `json:"payload"`
 }
 
-// SyncRequest — JSON-запрос синхронизации.
+// SyncRequest - JSON-запрос синхронизации.
 type SyncRequest struct {
 	Since time.Time `json:"since"`
 	Items []Item    `json:"items"`
 }
 
-// SyncResponse — JSON-ответ синхронизации.
+// SyncResponse - JSON-ответ синхронизации.
 type SyncResponse struct {
 	ServerTime time.Time `json:"server_time"`
 	Items      []Item    `json:"items"`
 }
 
-// API — клиент удалённого сервера.
+// API - клиент удалённого сервера.
 type API struct {
 	baseURL    string
 	httpClient *http.Client
@@ -95,7 +100,10 @@ func (a *API) auth(ctx context.Context, path, login, password string) (string, e
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("%s: %s", resp.Status, string(data))
 	}
@@ -127,7 +135,10 @@ func (a *API) SyncJSON(ctx context.Context, req SyncRequest) (*SyncResponse, err
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(data))
 	}
@@ -167,7 +178,10 @@ func (a *API) SyncBinary(ctx context.Context, since time.Time, items []Item) (*S
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(data))
 	}
@@ -197,7 +211,10 @@ func (a *API) ListItems(ctx context.Context) ([]Item, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(data))
 	}

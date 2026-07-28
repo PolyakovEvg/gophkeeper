@@ -1,5 +1,5 @@
-// Package domain содержит доменные модели GophKeeper.
-package domain
+// Package models содержит доменные модели GophKeeper.
+package models
 
 import (
 	"time"
@@ -13,13 +13,13 @@ type ItemType string
 const (
 	// ItemCredentials - пара логин/пароль.
 	ItemCredentials ItemType = "credentials"
-	// ItemText — произвольный текст.
+	// ItemText - произвольный текст.
 	ItemText ItemType = "text"
-	// ItemBinary — произвольные бинарные данные.
+	// ItemBinary - произвольные бинарные данные.
 	ItemBinary ItemType = "binary"
-	// ItemBankCard — данные банковской карты.
+	// ItemBankCard - данные банковской карты.
 	ItemBankCard ItemType = "bank_card"
-	// ItemOTP — секрет для TOTP/HOTP.
+	// ItemOTP - секрет для TOTP/HOTP.
 	ItemOTP ItemType = "otp"
 )
 
@@ -41,7 +41,7 @@ type User struct {
 	CreatedAt    time.Time
 }
 
-// VaultItem — запись сейфа на сервере (полезная нагрузка уже зашифрована клиентом).
+// VaultItem - запись сейфа на сервере (полезная нагрузка уже зашифрована клиентом).
 type VaultItem struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -51,24 +51,24 @@ type VaultItem struct {
 	Payload   []byte
 }
 
-// CredentialsData — полезные данные типа credentials (до шифрования).
+// CredentialsData - полезные данные типа credentials (до шифрования).
 type CredentialsData struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`
 }
 
-// TextData — произвольный текст.
+// TextData - произвольный текст.
 type TextData struct {
 	Content string `json:"content"`
 }
 
-// BinaryData — бинарные данные в base64-представлении для JSON.
+// BinaryData - бинарные данные в base64-представлении для JSON.
 type BinaryData struct {
 	Content []byte `json:"content"`
 	Mime    string `json:"mime,omitempty"`
 }
 
-// BankCardData — данные банковской карты.
+// BankCardData - данные банковской карты.
 type BankCardData struct {
 	Number string `json:"number"`
 	Holder string `json:"holder"`
@@ -77,7 +77,7 @@ type BankCardData struct {
 	Bank   string `json:"bank,omitempty"`
 }
 
-// OTPData — секрет для TOTP/HOTP аутентификации.
+// OTPData - секрет для TOTP/HOTP аутентификации.
 type OTPData struct {
 	Secret    string `json:"secret"`
 	Issuer    string `json:"issuer,omitempty"`
@@ -89,7 +89,7 @@ type OTPData struct {
 	Type      string `json:"type"`              // "totp" или "hotp"
 }
 
-// ItemPayload — расшифрованное содержимое записи сейфа.
+// ItemPayload - расшифрованное содержимое записи сейфа.
 type ItemPayload struct {
 	Type        ItemType          `json:"type"`
 	Title       string            `json:"title"`
@@ -101,7 +101,7 @@ type ItemPayload struct {
 	OTP         *OTPData          `json:"otp,omitempty"`
 }
 
-// LocalItem — локальная копия записи на клиенте.
+// LocalItem - локальная копия записи на клиенте.
 type LocalItem struct {
 	ID        uuid.UUID
 	Version   int64

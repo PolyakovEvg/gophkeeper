@@ -238,3 +238,30 @@ func TestHandlerEdgeCases(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+func TestSyncWithInvalidItemID(t *testing.T) {
+	handler, store, authSvc := setupRouter(t)
+	ctx := context.Background()
+	userID, err := store.CreateUser(ctx, "syncuser", "hash")
+	require.NoError(t, err)
+	token, err := authSvc.GenerateToken(userID)
+	require.NoError(t, err)
+
+	syncBody, _ := json.Marshal(map[string]any{
+		"since": time.Time{},
+		"items": []any{
+			map[string]any{
+				"id":         "not-a-uuid",
+				"version":    1,
+				"updated_at": time.Now().UTC(),
+				"deleted":    false,
+				"payload":    []byte("data"),
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(syncBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+}

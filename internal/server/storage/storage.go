@@ -30,7 +30,7 @@ var (
 	ErrUserExists   = errors.New("user already exists")
 )
 
-// Storage — доступ к данным сервера через PostgreSQL.
+// Storage - доступ к данным сервера через PostgreSQL.
 type Storage struct {
 	pool *pgxpool.Pool
 }
@@ -92,8 +92,8 @@ func (s *Storage) CreateUser(ctx context.Context, login, passwordHash string) (u
 }
 
 // GetUserByLogin возвращает пользователя по логину.
-func (s *Storage) GetUserByLogin(ctx context.Context, login string) (*domain.User, error) {
-	user := &domain.User{}
+func (s *Storage) GetUserByLogin(ctx context.Context, login string) (*models.User, error) {
+	user := &models.User{}
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, login, password_hash, created_at FROM users WHERE login = $1`, login,
 	).Scan(&user.ID, &user.Login, &user.PasswordHash, &user.CreatedAt)
@@ -107,12 +107,12 @@ func (s *Storage) GetUserByLogin(ctx context.Context, login string) (*domain.Use
 }
 
 // UpsertItem создаёт или обновляет запись сейфа (last-write-wins по version).
-func (s *Storage) UpsertItem(ctx context.Context, item *domain.VaultItem) error {
+func (s *Storage) UpsertItem(ctx context.Context, item *models.VaultItem) error {
 	return upsertItem(ctx, s.pool, item)
 }
 
 // SyncItems атомарно применяет входящие изменения и возвращает записи, изменённые после since.
-func (s *Storage) SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []domain.VaultItem) ([]domain.VaultItem, error) {
+func (s *Storage) SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []models.VaultItem) ([]models.VaultItem, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin sync tx: %w", err)
@@ -142,7 +142,7 @@ type execQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-func upsertItem(ctx context.Context, db execQuerier, item *domain.VaultItem) error {
+func upsertItem(ctx context.Context, db execQuerier, item *models.VaultItem) error {
 	_, err := db.Exec(ctx, `
 INSERT INTO vault_items(id, user_id, version, updated_at, deleted, payload)
 VALUES($1, $2, $3, $4, $5, $6)
@@ -161,7 +161,7 @@ WHERE vault_items.user_id = EXCLUDED.user_id
 	return nil
 }
 
-func listItemsSince(ctx context.Context, db execQuerier, userID uuid.UUID, since time.Time) ([]domain.VaultItem, error) {
+func listItemsSince(ctx context.Context, db execQuerier, userID uuid.UUID, since time.Time) ([]models.VaultItem, error) {
 	rows, err := db.Query(ctx, `
 SELECT id, user_id, version, updated_at, deleted, payload
 FROM vault_items
@@ -175,12 +175,12 @@ ORDER BY updated_at ASC`, userID, since.UTC())
 }
 
 // ListItemsSince возвращает записи пользователя, изменённые после since.
-func (s *Storage) ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]domain.VaultItem, error) {
+func (s *Storage) ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]models.VaultItem, error) {
 	return listItemsSince(ctx, s.pool, userID, since)
 }
 
 // ListAllItems возвращает все записи пользователя.
-func (s *Storage) ListAllItems(ctx context.Context, userID uuid.UUID) ([]domain.VaultItem, error) {
+func (s *Storage) ListAllItems(ctx context.Context, userID uuid.UUID) ([]models.VaultItem, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT id, user_id, version, updated_at, deleted, payload
 FROM vault_items
@@ -194,8 +194,8 @@ ORDER BY updated_at ASC`, userID)
 }
 
 // GetItem возвращает запись по ID.
-func (s *Storage) GetItem(ctx context.Context, userID, itemID uuid.UUID) (*domain.VaultItem, error) {
-	item := &domain.VaultItem{}
+func (s *Storage) GetItem(ctx context.Context, userID, itemID uuid.UUID) (*models.VaultItem, error) {
+	item := &models.VaultItem{}
 	err := s.pool.QueryRow(ctx, `
 SELECT id, user_id, version, updated_at, deleted, payload
 FROM vault_items
@@ -216,10 +216,10 @@ func (s *Storage) TruncateForTest(ctx context.Context) error {
 	return err
 }
 
-func scanItems(rows pgx.Rows) ([]domain.VaultItem, error) {
-	var items []domain.VaultItem
+func scanItems(rows pgx.Rows) ([]models.VaultItem, error) {
+	var items []models.VaultItem
 	for rows.Next() {
-		var item domain.VaultItem
+		var item models.VaultItem
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Version, &item.UpdatedAt, &item.Deleted, &item.Payload); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}

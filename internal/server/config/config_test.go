@@ -48,3 +48,13 @@ func TestNewConfigEnvOnly(t *testing.T) {
 	assert.Equal(t, "postgres://env/gophkeeper", cfg.DatabaseURI)
 	assert.Equal(t, "env-secret", cfg.JWTSecret)
 }
+
+func TestNewConfigEmptyJWTSecret(t *testing.T) {
+	t.Setenv("RUN_ADDRESS", "localhost:8080")
+	t.Setenv("DATABASE_URI", "postgres://test")
+	t.Setenv("JWT_SECRET", "")
+
+	cfg, err := config.NewConfig(nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, cfg.JWTSecret)
+}
