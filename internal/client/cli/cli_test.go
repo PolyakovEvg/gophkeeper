@@ -17,7 +17,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zalando/go-keyring"
 )
+
+func TestMain(m *testing.M) {
+	keyring.MockInit()
+	os.Exit(m.Run())
+}
 
 func TestCLIVersionAndFlow(t *testing.T) {
 	srvStore := storage.OpenTest(t)
