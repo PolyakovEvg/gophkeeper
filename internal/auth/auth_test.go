@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

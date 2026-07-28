@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gophkeeper/internal/auth"
-	"gophkeeper/internal/server/middleware"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/middleware"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

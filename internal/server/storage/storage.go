@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"gophkeeper/internal/domain"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"

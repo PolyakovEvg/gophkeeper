@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"gophkeeper/internal/client/cli"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/cli"
 )
 
 // Заполняются через -ldflags при сборке.

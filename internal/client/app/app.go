@@ -9,19 +9,19 @@ import (
 	"path/filepath"
 	"time"
 
-	"gophkeeper/internal/client"
-	"gophkeeper/internal/client/localstore"
-	"gophkeeper/internal/crypto"
-	"gophkeeper/internal/domain"
-	"gophkeeper/internal/otp"
+	"github.com/PolyakovEvg/gophkeeper/internal/client"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/localstore"
+	"github.com/PolyakovEvg/gophkeeper/internal/crypto"
+	domain "github.com/PolyakovEvg/gophkeeper/internal/models"
+	"github.com/PolyakovEvg/gophkeeper/internal/otp"
 
 	"github.com/google/uuid"
 )
 
 // App — фасад клиентского приложения.
 type App struct {
-	API   *client.API
-	Store *localstore.Store
+	API     *client.API
+	Store   *localstore.Store
 	DataDir string
 }
 
@@ -243,5 +243,5 @@ func (a *App) OTPCode(id uuid.UUID) (string, error) {
 	}
 	period := item.Payload.OTP.Period
 	digits := item.Payload.OTP.Digits
-	return otp.Generate(item.Payload.OTP.Secret, time.Now(), period, digits)
+	return otp.Generate(item.Payload.OTP.Secret, time.Now(), uint(period), digits)
 }

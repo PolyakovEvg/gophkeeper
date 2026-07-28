@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"gophkeeper/internal/client"
-	"gophkeeper/internal/client/app"
-	"gophkeeper/internal/client/localstore"
-	"gophkeeper/internal/client/tui"
-	"gophkeeper/internal/domain"
+	"github.com/PolyakovEvg/gophkeeper/internal/client"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/app"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/localstore"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/tui"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	"github.com/google/uuid"
 )

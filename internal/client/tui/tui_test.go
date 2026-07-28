@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"gophkeeper/internal/domain"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"

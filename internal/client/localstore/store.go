@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"gophkeeper/internal/crypto"
-	"gophkeeper/internal/domain"
+	"github.com/PolyakovEvg/gophkeeper/internal/crypto"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"

@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"gophkeeper/internal/server/config"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/config"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

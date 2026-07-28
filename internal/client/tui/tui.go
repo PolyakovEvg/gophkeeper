@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gophkeeper/internal/domain"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"gophkeeper/internal/auth"
-	"gophkeeper/internal/server/config"
-	"gophkeeper/internal/server/handlers"
-	"gophkeeper/internal/server/storage"
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/config"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/handlers"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 )
 
 const (
