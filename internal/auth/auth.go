@@ -31,8 +31,6 @@ type Service struct {
 // Если секрет пустой, генерируется случайный и логируется предупреждение.
 func NewService(secret string) *Service {
 	if secret == "" {
-		// Генерируем случайный секрет для разработки
-		// В продакшене JWT_SECRET должен быть задан явно
 		randomSecret := make([]byte, 32)
 		if _, err := rand.Read(randomSecret); err != nil {
 			panic(fmt.Sprintf("failed to generate random JWT secret: %v", err))
@@ -55,6 +53,15 @@ func HashPassword(password string) (string, error) {
 // CheckPassword проверяет соответствие пароля хешу.
 func CheckPassword(password, hash string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// dummyHash - валидный bcrypt-хеш без соответствующего реального пароля.
+const dummyHash = "$2a$10$384LkVxlcxuAzXQ.zXjJsej7hZr/CA.narFxheT1gUlvUJk45Iug6"
+
+// CheckDummyPassword выполняет bcrypt-сравнение с фиктивным хешем, чтобы время
+// ответа при несуществующем логине не отличалось от времени ответа при неверном пароле.
+func CheckDummyPassword(password string) {
+	_ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
 }
 
 // GenerateToken выпускает JWT для пользователя.

@@ -129,7 +129,7 @@ paths:
   /api/v1/sync/binary:
     post:
       summary: Bidirectional binary (gob) sync
-      description: Тело запроса и ответа — gob-сериализация SyncRequest/SyncResponse.
+      description: Тело запроса и ответа - gob-сериализация SyncRequest/SyncResponse.
       security:
         - bearerAuth: []
       requestBody:

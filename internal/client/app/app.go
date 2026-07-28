@@ -114,8 +114,8 @@ func (a *App) RestoreSessionWithPassword(password string) error {
 
 // HasSession проверяет, есть ли сохранённая сессия (токен).
 func (a *App) HasSession() bool {
-	_, err := a.Store.GetMeta("token")
-	return err == nil
+	token, err := a.Store.GetMeta("token")
+	return err == nil && token != ""
 }
 
 // AddItem добавляет новую запись локально.
@@ -195,6 +195,7 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		since, _ = time.Parse(time.RFC3339Nano, raw)
 	}
 
+	pushedVersions := make(map[uuid.UUID]int64, len(dirty))
 	wireItems := make([]client.Item, 0, len(dirty))
 	for _, it := range dirty {
 		raw, err := json.Marshal(it.Payload)
@@ -205,6 +206,7 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		if err != nil {
 			return err
 		}
+		pushedVersions[it.ID] = it.Version
 		wireItems = append(wireItems, client.Item{
 			ID: it.ID.String(), Version: it.Version, UpdatedAt: it.UpdatedAt,
 			Deleted: it.Deleted, Payload: enc,
@@ -221,17 +223,27 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		return err
 	}
 
+	conflicts := make(map[uuid.UUID]struct{})
+	incomplete := false
 	for _, remote := range resp.Items {
 		id, err := uuid.Parse(remote.ID)
 		if err != nil {
+			incomplete = true
 			continue
 		}
 		raw, err := crypto.DecryptWithPassword(remote.Payload, a.Store.Password())
 		if err != nil {
+			incomplete = true
 			continue
 		}
 		var payload models.ItemPayload
 		if err := json.Unmarshal(raw, &payload); err != nil {
+			incomplete = true
+			continue
+		}
+
+		if pushedVersion, ok := pushedVersions[id]; ok && remote.Version > pushedVersion {
+			conflicts[id] = struct{}{}
 			continue
 		}
 
@@ -250,10 +262,22 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 	}
 
 	for _, it := range dirty {
+		if _, conflicted := conflicts[it.ID]; conflicted {
+			continue
+		}
 		_ = a.Store.MarkClean(it.ID)
 	}
 
-	return a.Store.SetMeta("last_sync", resp.ServerTime.UTC().Format(time.RFC3339Nano))
+	if !incomplete {
+		if err := a.Store.SetMeta("last_sync", resp.ServerTime.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+
+	if len(conflicts) > 0 {
+		return fmt.Errorf("sync completed with %d conflicting item(s): local changes were newer on the server and were not applied; resolve and sync again", len(conflicts))
+	}
+	return nil
 }
 
 // Logout очищает сессию и разлогинивает пользователя.

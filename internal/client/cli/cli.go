@@ -53,8 +53,6 @@ func Run(args []string, stdout, stderr io.Writer, info VersionInfo) int {
 	}
 	defer cleanup()
 
-	// newApp consumes global flags from rest via a FlagSet; remaining args are command-specific.
-	// We re-parse by filtering known global flags.
 	cmdArgs := stripGlobalFlags(rest)
 
 	ctx := context.Background()
@@ -173,7 +171,6 @@ func stripGlobalFlags(args []string) []string {
 		case a == "-server" || a == "-data":
 			i++
 		case strings.HasPrefix(a, "-server=") || strings.HasPrefix(a, "-data="):
-			// skip
 		default:
 			out = append(out, a)
 		}
@@ -304,8 +301,7 @@ func runAdd(a *app.App, args []string, stdout, stderr io.Writer) int {
 	}
 	payload.Metadata = parseMeta(*meta)
 
-	// Restore session to get password for encryption
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -342,7 +338,7 @@ func runList(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -371,7 +367,7 @@ func runGet(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -405,7 +401,7 @@ func runDelete(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -431,7 +427,7 @@ func runSync(ctx context.Context, a *app.App, args []string, stdout, stderr io.W
 		return 1
 	}
 
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -457,7 +453,7 @@ func runOTP(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := restoreSession(a, *masterPassword, stderr); err != nil {
+	if err := restoreSession(a, *masterPassword); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -476,14 +472,12 @@ func runOTP(a *app.App, args []string, stdout, stderr io.Writer) int {
 }
 
 // restoreSession пытается восстановить сессию из keychain или запрашивает пароль.
-func restoreSession(a *app.App, password string, stderr io.Writer) error {
-	// Сначала пробуем восстановить из keychain
+func restoreSession(a *app.App, password string) error {
 	err := a.RestoreSession()
 	if err == nil {
 		return nil
 	}
 
-	// Если пароль не найден в keychain, запрашиваем у пользователя
 	if err == app.ErrPasswordRequired {
 		if password != "" {
 			return a.RestoreSessionWithPassword(password)

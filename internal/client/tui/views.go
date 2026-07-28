@@ -50,7 +50,7 @@ func (m model) renderMain() string {
 		if i == m.cursor {
 			cursor = selectedStyle.Render("→ ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, opt))
+		fmt.Fprintf(&b, "%s%s\n", cursor, opt)
 	}
 
 	b.WriteString("\n")
@@ -74,7 +74,7 @@ func (m model) renderLogin() string {
 		if inp.label == "Пароль" {
 			value = strings.Repeat("•", len(value))
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", label, value))
+		fmt.Fprintf(&b, "%s%s\n", label, value)
 		if i == m.inputIdx {
 			b.WriteString(helpStyle.Render("   Введите значение и нажмите Enter\n"))
 		}
@@ -106,7 +106,7 @@ func (m model) renderRegister() string {
 		if inp.label == "Пароль" {
 			value = strings.Repeat("•", len(value))
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", label, value))
+		fmt.Fprintf(&b, "%s%s\n", label, value)
 	}
 
 	if m.err != "" {
@@ -136,7 +136,7 @@ func (m model) renderUnlock() string {
 			label = "  " + label
 		}
 		value := strings.Repeat("•", len(inp.value))
-		b.WriteString(fmt.Sprintf("%s%s\n", label, value))
+		fmt.Fprintf(&b, "%s%s\n", label, value)
 		if i == m.inputIdx {
 			b.WriteString(helpStyle.Render("   Введите значение и нажмите Enter\n"))
 		}
@@ -172,7 +172,7 @@ func (m model) renderList() string {
 				cursor = selectedStyle.Render("→ ")
 			}
 			icon := iconForType(it.Payload.Type)
-			b.WriteString(fmt.Sprintf("%s%s %s [%s]\n", cursor, icon, it.Payload.Title, it.Payload.Type))
+			fmt.Fprintf(&b, "%s%s %s [%s]\n", cursor, icon, it.Payload.Title, it.Payload.Type)
 		}
 	}
 
@@ -210,7 +210,7 @@ func (m model) renderAddType() string {
 		if i == m.cursor {
 			cursor = selectedStyle.Render("→ ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, t.name))
+		fmt.Fprintf(&b, "%s%s\n", cursor, t.name)
 	}
 
 	b.WriteString("\n")
@@ -236,7 +236,7 @@ func (m model) renderAddForm() string {
 			strings.Contains(strings.ToLower(inp.label), "секрет") {
 			value = strings.Repeat("•", len(value))
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", label, value))
+		fmt.Fprintf(&b, "%s%s\n", label, value)
 	}
 
 	if m.err != "" {
@@ -256,34 +256,34 @@ func (m model) renderView() string {
 
 	if m.selected != nil {
 		it := m.selected
-		b.WriteString(fmt.Sprintf("ID: %s\n", it.ID.String()[:8]+"..."))
-		b.WriteString(fmt.Sprintf("Тип: %s\n", it.Payload.Type))
-		b.WriteString(fmt.Sprintf("Название: %s\n", it.Payload.Title))
-		b.WriteString(fmt.Sprintf("Версия: %d\n", it.Version))
-		b.WriteString(fmt.Sprintf("Обновлено: %s\n", it.UpdatedAt.Format(time.RFC3339)))
+		fmt.Fprintf(&b, "ID: %s\n", it.ID.String()[:8]+"...")
+		fmt.Fprintf(&b, "Тип: %s\n", it.Payload.Type)
+		fmt.Fprintf(&b, "Название: %s\n", it.Payload.Title)
+		fmt.Fprintf(&b, "Версия: %d\n", it.Version)
+		fmt.Fprintf(&b, "Обновлено: %s\n", it.UpdatedAt.Format(time.RFC3339))
 
 		b.WriteString("\n--- Данные ---\n")
 		switch it.Payload.Type {
 		case models.ItemCredentials:
 			if it.Payload.Credentials != nil {
-				b.WriteString(fmt.Sprintf("Логин: %s\n", it.Payload.Credentials.Login))
-				b.WriteString(fmt.Sprintf("Пароль: %s\n", it.Payload.Credentials.Password))
+				fmt.Fprintf(&b, "Логин: %s\n", it.Payload.Credentials.Login)
+				fmt.Fprintf(&b, "Пароль: %s\n", it.Payload.Credentials.Password)
 			}
 		case models.ItemText:
 			if it.Payload.Text != nil {
-				b.WriteString(fmt.Sprintf("Содержимое: %s\n", it.Payload.Text.Content))
+				fmt.Fprintf(&b, "Содержимое: %s\n", it.Payload.Text.Content)
 			}
 		case models.ItemBankCard:
 			if it.Payload.BankCard != nil {
-				b.WriteString(fmt.Sprintf("Номер: %s\n", it.Payload.BankCard.Number))
-				b.WriteString(fmt.Sprintf("Держатель: %s\n", it.Payload.BankCard.Holder))
-				b.WriteString(fmt.Sprintf("Срок: %s\n", it.Payload.BankCard.Expiry))
-				b.WriteString(fmt.Sprintf("Банк: %s\n", it.Payload.BankCard.Bank))
+				fmt.Fprintf(&b, "Номер: %s\n", it.Payload.BankCard.Number)
+				fmt.Fprintf(&b, "Держатель: %s\n", it.Payload.BankCard.Holder)
+				fmt.Fprintf(&b, "Срок: %s\n", it.Payload.BankCard.Expiry)
+				fmt.Fprintf(&b, "Банк: %s\n", it.Payload.BankCard.Bank)
 			}
 		case models.ItemOTP:
 			if it.Payload.OTP != nil {
-				b.WriteString(fmt.Sprintf("Issuer: %s\n", it.Payload.OTP.Issuer))
-				b.WriteString(fmt.Sprintf("Account: %s\n", it.Payload.OTP.Account))
+				fmt.Fprintf(&b, "Issuer: %s\n", it.Payload.OTP.Issuer)
+				fmt.Fprintf(&b, "Account: %s\n", it.Payload.OTP.Account)
 			}
 		}
 	}
@@ -299,7 +299,7 @@ func (m model) renderDeleteConfirm() string {
 	b.WriteString("\n\n")
 
 	if m.selected != nil {
-		b.WriteString(fmt.Sprintf("Удалить запись \"%s\"?\n\n", m.selected.Payload.Title))
+		fmt.Fprintf(&b, "Удалить запись \"%s\"?\n\n", m.selected.Payload.Title)
 	}
 
 	options := []string{"Да, удалить", "Отмена"}
@@ -308,7 +308,7 @@ func (m model) renderDeleteConfirm() string {
 		if i == m.cursor {
 			cursor = selectedStyle.Render("→ ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, opt))
+		fmt.Fprintf(&b, "%s%s\n", cursor, opt)
 	}
 
 	b.WriteString("\n")

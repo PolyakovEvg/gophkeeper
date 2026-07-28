@@ -143,6 +143,7 @@ func (rt *Router) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := rt.store.GetUserByLogin(r.Context(), req.Login)
 	if err != nil {
+		auth.CheckDummyPassword(req.Password)
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -339,7 +340,6 @@ func (rt *Router) doSync(r *http.Request, userID uuid.UUID, since time.Time, ite
 	for _, dto := range items {
 		item, err := dtoToVault(userID, dto)
 		if err != nil {
-			// Log invalid items instead of silently skipping
 			rt.logger.Warn("invalid item in sync", "id", dto.ID, "error", err)
 			continue
 		}

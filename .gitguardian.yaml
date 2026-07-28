@@ -1,4 +1,4 @@
-# Конфиг GitGuardian / ggshield: тестовые OTP-векторы — не боевые секреты.
+# Конфиг GitGuardian / ggshield: тестовые OTP-векторы - не боевые секреты.
 version: 2
 
 paths-ignore:
