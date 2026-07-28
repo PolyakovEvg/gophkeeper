@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	// maxResponseBodySize limits response body size to prevent DoS (32 MB).
 	maxResponseBodySize = 32 << 20
 )
 

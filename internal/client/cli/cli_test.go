@@ -227,12 +227,10 @@ func TestCLIErrors(t *testing.T) {
 func TestCLIFlagParsing(t *testing.T) {
 	t.Parallel()
 
-	// filterGlobalFlags и stripGlobalFlags покрываются через Run
 	dataDir := t.TempDir()
 	info := cli.VersionInfo{Version: "test", BuildDate: "now"}
 
 	var out, errBuf bytes.Buffer
-	// -server= форма
 	code := cli.Run([]string{"version", "-server=http://localhost:8080", "-data=" + dataDir}, &out, &errBuf, info)
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out.String(), "test")
@@ -240,7 +238,6 @@ func TestCLIFlagParsing(t *testing.T) {
 
 func TestEnvOr(t *testing.T) {
 	t.Setenv("GOPHKEEPER_TEST_ENV", "value")
-	// косвенно через newApp с env
 	dataDir := t.TempDir()
 	info := cli.VersionInfo{Version: "test", BuildDate: "now"}
 	var out, errBuf bytes.Buffer
