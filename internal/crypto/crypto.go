@@ -5,29 +5,30 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
 const (
 	saltSize  = 16
 	nonceSize = 12
 	keySize   = 32
-	// OWASP 2023 recommends minimum 600,000 iterations for PBKDF2-SHA256
-	iterations = 600_000
+	// Argon2id parameters (OWASP recommendations)
+	argon2Time        = 3
+	argon2Memory      = 64 * 1024 // 64 MB
+	argon2Parallelism = 4
 )
 
 // ErrDecryptionFailed возвращается при неверном ключе или повреждённых данных.
 var ErrDecryptionFailed = errors.New("decryption failed")
 
-// DeriveKey выводит ключ шифрования из пароля и соли (PBKDF2-SHA256).
+// DeriveKey выводит ключ шифрования из пароля и соли (Argon2id).
 func DeriveKey(password string, salt []byte) []byte {
-	return pbkdf2.Key([]byte(password), salt, iterations, keySize, sha256.New)
+	return argon2.IDKey([]byte(password), salt, argon2Time, argon2Memory, argon2Parallelism, keySize)
 }
 
 // NewSalt генерирует криптостойкую соль.
