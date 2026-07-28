@@ -20,19 +20,24 @@ import (
 	"github.com/google/uuid"
 )
 
-// AuthStorage — хранилище для аутентификации.
+const (
+	maxJSONBodySize     = 32 << 20
+	maxSyncJSONBodySize = 32 << 20
+)
+
+// AuthStorage - хранилище для аутентификации.
 type AuthStorage interface {
 	CreateUser(ctx context.Context, login, passwordHash string) (uuid.UUID, error)
-	GetUserByLogin(ctx context.Context, login string) (*domain.User, error)
+	GetUserByLogin(ctx context.Context, login string) (*models.User, error)
 }
 
-// VaultStorage — хранилище записей сейфа.
+// VaultStorage - хранилище записей сейфа.
 type VaultStorage interface {
-	UpsertItem(ctx context.Context, item *domain.VaultItem) error
-	SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []domain.VaultItem) ([]domain.VaultItem, error)
-	ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]domain.VaultItem, error)
-	ListAllItems(ctx context.Context, userID uuid.UUID) ([]domain.VaultItem, error)
-	GetItem(ctx context.Context, userID, itemID uuid.UUID) (*domain.VaultItem, error)
+	UpsertItem(ctx context.Context, item *models.VaultItem) error
+	SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []models.VaultItem) ([]models.VaultItem, error)
+	ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]models.VaultItem, error)
+	ListAllItems(ctx context.Context, userID uuid.UUID) ([]models.VaultItem, error)
+	GetItem(ctx context.Context, userID, itemID uuid.UUID) (*models.VaultItem, error)
 }
 
 // Storage объединяет зависимости хендлеров.
@@ -89,6 +94,7 @@ type tokenResponse struct {
 
 // Register регистрирует нового пользователя.
 func (rt *Router) Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req credentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -128,6 +134,7 @@ func (rt *Router) Register(w http.ResponseWriter, r *http.Request) {
 
 // Login аутентифицирует пользователя.
 func (rt *Router) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 	var req credentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -136,12 +143,7 @@ func (rt *Router) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := rt.store.GetUserByLogin(r.Context(), req.Login)
 	if err != nil {
-		if errors.Is(err, storage.ErrUserNotFound) {
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
-			return
-		}
-		rt.logger.Error("get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
@@ -256,7 +258,7 @@ func (rt *Router) SyncJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-
+	r.Body = http.MaxBytesReader(w, r.Body, maxSyncJSONBodySize)
 	var req syncRequestJSON
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -312,7 +314,11 @@ func (rt *Router) SyncBinary(w http.ResponseWriter, r *http.Request) {
 
 	resp := protocol.SyncResponse{ServerTime: respJSON.ServerTime}
 	for _, it := range respJSON.Items {
-		id, _ := uuid.Parse(it.ID)
+		id, err := uuid.Parse(it.ID)
+		if err != nil {
+			rt.logger.Warn("invalid item id in response", "id", it.ID, "error", err)
+			continue
+		}
 		resp.Items = append(resp.Items, protocol.ItemEnvelope{
 			ID: id, Version: it.Version, UpdatedAt: it.UpdatedAt, Deleted: it.Deleted, Payload: it.Payload,
 		})
@@ -329,10 +335,12 @@ func (rt *Router) SyncBinary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) doSync(r *http.Request, userID uuid.UUID, since time.Time, items []itemDTO) (syncResponseJSON, error) {
-	incoming := make([]domain.VaultItem, 0, len(items))
+	incoming := make([]models.VaultItem, 0, len(items))
 	for _, dto := range items {
 		item, err := dtoToVault(userID, dto)
 		if err != nil {
+			// Log invalid items instead of silently skipping
+			rt.logger.Warn("invalid item in sync", "id", dto.ID, "error", err)
 			continue
 		}
 		incoming = append(incoming, *item)
@@ -350,7 +358,7 @@ func (rt *Router) doSync(r *http.Request, userID uuid.UUID, since time.Time, ite
 	return syncResponseJSON{ServerTime: time.Now().UTC(), Items: out}, nil
 }
 
-func dtoToVault(userID uuid.UUID, dto itemDTO) (*domain.VaultItem, error) {
+func dtoToVault(userID uuid.UUID, dto itemDTO) (*models.VaultItem, error) {
 	id, err := uuid.Parse(dto.ID)
 	if err != nil {
 		return nil, errors.New("invalid item id")
@@ -366,7 +374,7 @@ func dtoToVault(userID uuid.UUID, dto itemDTO) (*domain.VaultItem, error) {
 	if version == 0 {
 		version = 1
 	}
-	return &domain.VaultItem{
+	return &models.VaultItem{
 		ID:        id,
 		UserID:    userID,
 		Version:   version,
@@ -376,7 +384,7 @@ func dtoToVault(userID uuid.UUID, dto itemDTO) (*domain.VaultItem, error) {
 	}, nil
 }
 
-func vaultToDTO(item domain.VaultItem) itemDTO {
+func vaultToDTO(item models.VaultItem) itemDTO {
 	return itemDTO{
 		ID:        item.ID.String(),
 		Version:   item.Version,

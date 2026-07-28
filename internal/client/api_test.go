@@ -58,3 +58,22 @@ func TestAPIErrors(t *testing.T) {
 	err := api.Login(context.Background(), "nope", "x")
 	assert.Error(t, err)
 }
+
+func TestAPIRegisterDuplicate(t *testing.T) {
+	store := storage.OpenTest(t)
+	srv := httptest.NewServer(handlers.NewRouter(store, auth.NewService("s"), slog.Default()).Routes())
+	t.Cleanup(srv.Close)
+
+	api := client.New(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	require.NoError(t, api.Register(ctx, "dupuser", "pass"))
+	err := api.Register(ctx, "dupuser", "pass2")
+	assert.Error(t, err)
+}
+
+func TestAPISetToken(t *testing.T) {
+	api := client.New("http://localhost", nil)
+	api.SetToken("test-token")
+	assert.Equal(t, "test-token", api.Token())
+}

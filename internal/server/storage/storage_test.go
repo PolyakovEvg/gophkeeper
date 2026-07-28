@@ -31,7 +31,7 @@ func TestStorageUsersAndItems(t *testing.T) {
 	assert.ErrorIs(t, err, storage.ErrUserNotFound)
 
 	itemID := uuid.New()
-	item := &domain.VaultItem{
+	item := &models.VaultItem{
 		ID: itemID, UserID: id, Version: 1, UpdatedAt: time.Now().UTC(),
 		Payload: []byte("cipher"),
 	}
@@ -78,7 +78,7 @@ func TestSyncItemsTransaction(t *testing.T) {
 	secondID := uuid.New()
 	now := time.Now().UTC()
 
-	items := []domain.VaultItem{
+	items := []models.VaultItem{
 		{ID: firstID, UserID: userID, Version: 1, UpdatedAt: now, Payload: []byte("a")},
 		{ID: secondID, UserID: userID, Version: 1, UpdatedAt: now.Add(time.Second), Payload: []byte("b")},
 	}
@@ -87,7 +87,7 @@ func TestSyncItemsTransaction(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 2)
 
-	stale := []domain.VaultItem{
+	stale := []models.VaultItem{
 		{ID: firstID, UserID: userID, Version: 1, UpdatedAt: now, Payload: []byte("stale")},
 	}
 	_, err = s.SyncItems(ctx, userID, now.Add(time.Hour), stale)

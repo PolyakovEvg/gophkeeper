@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	saltSize   = 16
-	nonceSize  = 12
-	keySize    = 32
-	iterations = 100_000
+	saltSize  = 16
+	nonceSize = 12
+	keySize   = 32
+	// OWASP 2023 recommends minimum 600,000 iterations for PBKDF2-SHA256
+	iterations = 600_000
 )
 
 // ErrDecryptionFailed возвращается при неверном ключе или повреждённых данных.

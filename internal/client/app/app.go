@@ -10,24 +10,26 @@ import (
 	"time"
 
 	"github.com/PolyakovEvg/gophkeeper/internal/client"
+	"github.com/PolyakovEvg/gophkeeper/internal/client/keyring"
 	"github.com/PolyakovEvg/gophkeeper/internal/client/localstore"
 	"github.com/PolyakovEvg/gophkeeper/internal/crypto"
-	domain "github.com/PolyakovEvg/gophkeeper/internal/models"
+	models "github.com/PolyakovEvg/gophkeeper/internal/models"
 	"github.com/PolyakovEvg/gophkeeper/internal/otp"
 
 	"github.com/google/uuid"
 )
 
-// App — фасад клиентского приложения.
+// App - фасад клиентского приложения.
 type App struct {
 	API     *client.API
 	Store   *localstore.Store
 	DataDir string
+	Keyring *keyring.Keyring
 }
 
 // New создаёт приложение с указанным API и локальным хранилищем.
 func New(api *client.API, store *localstore.Store, dataDir string) *App {
-	return &App{API: api, Store: store, DataDir: dataDir}
+	return &App{API: api, Store: store, DataDir: dataDir, Keyring: keyring.New()}
 }
 
 // DefaultDataDir возвращает ~/.gophkeeper.
@@ -64,47 +66,64 @@ func (a *App) persistSession(login, password string) error {
 	if err := a.Store.SetMeta("login", login); err != nil {
 		return err
 	}
-	// пароль хранится зашифрованным ключом, производным от login (упрощение для курса)
-	enc, err := crypto.EncryptWithPassword([]byte(password), login+"|gophkeeper")
-	if err != nil {
-		return err
+	if err := a.Keyring.SetMasterPassword(login, password); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to store password in keychain: %v\n", err)
 	}
-	return a.Store.SetMeta("master", crypto.EncodeBase64(enc))
+	return nil
 }
 
-// RestoreSession восстанавливает токен и master-пароль из локального хранилища.
+// RestoreSession восстанавливает сессию из локального хранилища и keychain.
+// Если пароль не найден в keychain, возвращает ошибку ErrPasswordRequired.
+var ErrPasswordRequired = fmt.Errorf("master password required")
+
 func (a *App) RestoreSession() error {
+	login, err := a.Store.GetMeta("login")
+	if err != nil {
+		return fmt.Errorf("not logged in: %w", err)
+	}
+	token, err := a.Store.GetMeta("token")
+	if err != nil {
+		return fmt.Errorf("not logged in: %w", err)
+	}
+	password, err := a.Keyring.GetMasterPassword(login)
+	if err != nil {
+		return ErrPasswordRequired
+	}
+	a.API.SetToken(token)
+	a.Store.SetPassword(password)
+	return nil
+}
+
+// RestoreSessionWithPassword восстанавливает сессию с явно указанным паролем.
+func (a *App) RestoreSessionWithPassword(password string) error {
 	token, err := a.Store.GetMeta("token")
 	if err != nil {
 		return fmt.Errorf("not logged in: %w", err)
 	}
 	login, err := a.Store.GetMeta("login")
 	if err != nil {
-		return err
-	}
-	masterB64, err := a.Store.GetMeta("master")
-	if err != nil {
-		return err
-	}
-	blob, err := crypto.DecodeBase64(masterB64)
-	if err != nil {
-		return err
-	}
-	passwordBytes, err := crypto.DecryptWithPassword(blob, login+"|gophkeeper")
-	if err != nil {
-		return err
+		return fmt.Errorf("not logged in: %w", err)
 	}
 	a.API.SetToken(token)
-	a.Store.SetPassword(string(passwordBytes))
+	a.Store.SetPassword(password)
+	if err := a.Keyring.SetMasterPassword(login, password); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to store password in keychain: %v\n", err)
+	}
 	return nil
 }
 
+// HasSession проверяет, есть ли сохранённая сессия (токен).
+func (a *App) HasSession() bool {
+	_, err := a.Store.GetMeta("token")
+	return err == nil
+}
+
 // AddItem добавляет новую запись локально.
-func (a *App) AddItem(payload domain.ItemPayload) (*domain.LocalItem, error) {
+func (a *App) AddItem(payload models.ItemPayload) (*models.LocalItem, error) {
 	if !payload.Type.Valid() {
 		return nil, fmt.Errorf("unsupported item type: %s", payload.Type)
 	}
-	item := domain.LocalItem{
+	item := models.LocalItem{
 		ID:        uuid.New(),
 		Version:   1,
 		UpdatedAt: time.Now().UTC(),
@@ -119,7 +138,7 @@ func (a *App) AddItem(payload domain.ItemPayload) (*domain.LocalItem, error) {
 }
 
 // UpdateItem обновляет существующую запись.
-func (a *App) UpdateItem(id uuid.UUID, payload domain.ItemPayload) error {
+func (a *App) UpdateItem(id uuid.UUID, payload models.ItemPayload) error {
 	existing, err := a.Store.GetItem(id)
 	if err != nil {
 		return err
@@ -146,20 +165,25 @@ func (a *App) DeleteItem(id uuid.UUID) error {
 }
 
 // GetItem возвращает локальную запись.
-func (a *App) GetItem(id uuid.UUID) (*domain.LocalItem, error) {
+func (a *App) GetItem(id uuid.UUID) (*models.LocalItem, error) {
 	return a.Store.GetItem(id)
 }
 
 // ListItems возвращает локальные записи.
-func (a *App) ListItems() ([]domain.LocalItem, error) {
+func (a *App) ListItems() ([]models.LocalItem, error) {
 	return a.Store.ListItems()
 }
 
 // Sync выполняет синхронизацию. binary=true использует gob-протокол.
 func (a *App) Sync(ctx context.Context, binary bool) error {
-	if err := a.RestoreSession(); err != nil {
-		return err
+	if a.Store.Password() == "" {
+		return fmt.Errorf("master password not set - please login first")
 	}
+	token, err := a.Store.GetMeta("token")
+	if err != nil {
+		return fmt.Errorf("not logged in: %w", err)
+	}
+	a.API.SetToken(token)
 
 	dirty, err := a.Store.ListDirty()
 	if err != nil {
@@ -206,7 +230,7 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		if err != nil {
 			continue
 		}
-		var payload domain.ItemPayload
+		var payload models.ItemPayload
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			continue
 		}
@@ -216,7 +240,7 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 			continue
 		}
 
-		item := domain.LocalItem{
+		item := models.LocalItem{
 			ID: id, Version: remote.Version, UpdatedAt: remote.UpdatedAt,
 			Deleted: remote.Deleted, Dirty: false, Payload: payload,
 		}
@@ -232,13 +256,38 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 	return a.Store.SetMeta("last_sync", resp.ServerTime.UTC().Format(time.RFC3339Nano))
 }
 
+// Logout очищает сессию и разлогинивает пользователя.
+func (a *App) Logout() error {
+	a.API.SetToken("")
+	a.Store.SetPassword("")
+	if err := a.Store.SetMeta("token", ""); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to clear token: %v\n", err)
+	}
+	if err := a.Store.SetMeta("login", ""); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to clear login: %v\n", err)
+	}
+	if err := a.Store.SetMeta("last_sync", ""); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to clear last_sync: %v\n", err)
+	}
+	return nil
+}
+
+// GetLogin возвращает логин текущего пользователя или пустую строку.
+func (a *App) GetLogin() string {
+	login, err := a.Store.GetMeta("login")
+	if err != nil {
+		return ""
+	}
+	return login
+}
+
 // OTPCode генерирует текущий TOTP для OTP-записи.
 func (a *App) OTPCode(id uuid.UUID) (string, error) {
 	item, err := a.Store.GetItem(id)
 	if err != nil {
 		return "", err
 	}
-	if item.Payload.Type != domain.ItemOTP || item.Payload.OTP == nil {
+	if item.Payload.Type != models.ItemOTP || item.Payload.OTP == nil {
 		return "", fmt.Errorf("item is not otp")
 	}
 	period := item.Payload.OTP.Period

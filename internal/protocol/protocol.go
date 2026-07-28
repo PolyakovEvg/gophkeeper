@@ -16,7 +16,7 @@ func init() {
 	gob.Register(ItemEnvelope{})
 }
 
-// ItemEnvelope — запись сейфа в бинарном протоколе.
+// ItemEnvelope - запись сейфа в бинарном протоколе.
 type ItemEnvelope struct {
 	ID        uuid.UUID
 	Version   int64
@@ -25,13 +25,13 @@ type ItemEnvelope struct {
 	Payload   []byte
 }
 
-// SyncRequest — запрос синхронизации клиента.
+// SyncRequest - запрос синхронизации клиента.
 type SyncRequest struct {
 	Since time.Time
 	Items []ItemEnvelope
 }
 
-// SyncResponse — ответ сервера на синхронизацию.
+// SyncResponse - ответ сервера на синхронизацию.
 type SyncResponse struct {
 	ServerTime time.Time
 	Items      []ItemEnvelope

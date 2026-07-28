@@ -9,7 +9,7 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
-// Config — параметры запуска сервера GophKeeper.
+// Config - параметры запуска сервера GophKeeper.
 type Config struct {
 	RunAddress  string `env:"RUN_ADDRESS"`
 	DatabaseURI string `env:"DATABASE_URI"`

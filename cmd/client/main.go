@@ -1,4 +1,4 @@
-// Package main — точка входа CLI-клиента GophKeeper.
+// Package main - точка входа CLI-клиента GophKeeper.
 package main
 
 import (
