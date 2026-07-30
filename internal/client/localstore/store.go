@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 
@@ -138,42 +139,60 @@ SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE id = ?`
 	return &item, nil
 }
 
-// ListItems возвращает активные (не удалённые) записи.
-func (s *Store) ListItems() ([]models.LocalItem, error) {
-	rows, err := s.db.Query(`
-SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE deleted = 0 ORDER BY updated_at DESC`)
+// queryItemsSeq стримит строки запроса по одной, закрывая rows, когда итерация
+// завершается (в том числе при досрочном break вызывающей стороной).
+func (s *Store) queryItemsSeq(query string) iter.Seq2[models.LocalItem, error] {
+	rows, err := s.db.Query(query)
 	if err != nil {
-		return nil, err
+		return func(yield func(models.LocalItem, error) bool) { yield(models.LocalItem{}, err) }
 	}
-	defer func() { _ = rows.Close() }()
+	return func(yield func(models.LocalItem, error) bool) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			item, err := s.scanItem(rows)
+			if err != nil {
+				yield(models.LocalItem{}, err)
+				return
+			}
+			if !yield(item, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(models.LocalItem{}, err)
+		}
+	}
+}
+
+func collectLocalItems(seq iter.Seq2[models.LocalItem, error]) ([]models.LocalItem, error) {
 	var items []models.LocalItem
-	for rows.Next() {
-		item, err := s.scanItem(rows)
+	for item, err := range seq {
 		if err != nil {
 			return nil, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	return items, nil
+}
+
+// ListItemsSeq стримит активные (не удалённые) записи по одной, без буферизации.
+func (s *Store) ListItemsSeq() iter.Seq2[models.LocalItem, error] {
+	return s.queryItemsSeq(`SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE deleted = 0 ORDER BY updated_at DESC`)
+}
+
+// ListItems возвращает активные (не удалённые) записи.
+func (s *Store) ListItems() ([]models.LocalItem, error) {
+	return collectLocalItems(s.ListItemsSeq())
+}
+
+// ListDirtySeq стримит изменённые локально записи для push, без буферизации.
+func (s *Store) ListDirtySeq() iter.Seq2[models.LocalItem, error] {
+	return s.queryItemsSeq(`SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE dirty = 1`)
 }
 
 // ListDirty возвращает изменённые локально записи для push.
 func (s *Store) ListDirty() ([]models.LocalItem, error) {
-	rows, err := s.db.Query(`
-SELECT id, version, updated_at, deleted, dirty, payload FROM items WHERE dirty = 1`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var items []models.LocalItem
-	for rows.Next() {
-		item, err := s.scanItem(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return collectLocalItems(s.ListDirtySeq())
 }
 
 // MarkClean сбрасывает dirty-флаг.

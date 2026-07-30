@@ -3,6 +3,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	models "github.com/PolyakovEvg/gophkeeper/internal/models"
 
@@ -150,8 +151,9 @@ func (m model) handleLogout() (tea.Model, tea.Cmd) {
 func (m model) handleBackspace() (tea.Model, tea.Cmd) {
 	if m.screen == screenLogin || m.screen == screenRegister || m.screen == screenAddForm || m.screen == screenUnlock {
 		if len(m.inputs) > 0 && m.inputIdx < len(m.inputs) {
-			if len(m.inputs[m.inputIdx].value) > 0 {
-				m.inputs[m.inputIdx].value = m.inputs[m.inputIdx].value[:len(m.inputs[m.inputIdx].value)-1]
+			runes := []rune(m.inputs[m.inputIdx].value)
+			if len(runes) > 0 {
+				m.inputs[m.inputIdx].value = string(runes[:len(runes)-1])
 			}
 		}
 	}
@@ -161,10 +163,12 @@ func (m model) handleBackspace() (tea.Model, tea.Cmd) {
 func (m model) handleInput(char string) (tea.Model, tea.Cmd) {
 	if m.screen == screenLogin || m.screen == screenRegister || m.screen == screenAddForm || m.screen == screenUnlock {
 		if len(m.inputs) > 0 && m.inputIdx < len(m.inputs) {
-			if len(char) == 1 || strings.HasPrefix(char, "shift+") {
-				if strings.HasPrefix(char, "shift+") {
-					char = strings.ToUpper(strings.TrimPrefix(char, "shift+"))
-				}
+			if strings.HasPrefix(char, "shift+") {
+				char = strings.ToUpper(strings.TrimPrefix(char, "shift+"))
+			}
+			// Учитываем длину в рунах, а не в байтах, иначе многобайтовые символы
+			// (например кириллица) отбрасываются как "не одна клавиша".
+			if utf8.RuneCountInString(char) == 1 {
 				m.inputs[m.inputIdx].value += char
 			}
 		}

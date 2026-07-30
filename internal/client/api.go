@@ -85,64 +85,69 @@ func (a *API) Login(ctx context.Context, login, password string) error {
 	return nil
 }
 
-func (a *API) auth(ctx context.Context, path, login, password string) (string, error) {
-	body, _ := json.Marshal(map[string]string{"login": login, "password": password})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return "", err
+// jsonRequest выполняет JSON-запрос к серверу и декодирует ответ в T.
+// body может быть nil (например, для GET-запросов).
+func jsonRequest[T any](ctx context.Context, a *API, method, path string, body any, authorize bool) (T, error) {
+	var zero T
+
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return zero, err
+		}
+		reader = bytes.NewReader(data)
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+	req, err := http.NewRequestWithContext(ctx, method, a.baseURL+path, reader)
+	if err != nil {
+		return zero, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if authorize {
+		a.setAuth(req)
+	}
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request: %w", err)
+		return zero, fmt.Errorf("request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
 	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
+		return zero, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s: %s", resp.Status, string(data))
+		return zero, fmt.Errorf("%s: %s", resp.Status, string(data))
 	}
 
-	var out struct {
-		Token string `json:"token"`
-	}
+	var out T
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", fmt.Errorf("decode token: %w", err)
+		return zero, fmt.Errorf("decode response: %w", err)
+	}
+	return out, nil
+}
+
+func (a *API) auth(ctx context.Context, path, login, password string) (string, error) {
+	out, err := jsonRequest[tokenResponse](ctx, a, http.MethodPost, path,
+		map[string]string{"login": login, "password": password}, false)
+	if err != nil {
+		return "", err
 	}
 	return out.Token, nil
 }
 
+type tokenResponse struct {
+	Token string `json:"token"`
+}
+
 // SyncJSON синхронизирует записи через JSON API.
 func (a *API) SyncJSON(ctx context.Context, req SyncRequest) (*SyncResponse, error) {
-	body, err := json.Marshal(req)
+	out, err := jsonRequest[SyncResponse](ctx, a, http.MethodPost, "/api/v1/sync", req, true)
 	if err != nil {
-		return nil, err
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/api/v1/sync", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	a.setAuth(httpReq)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", resp.Status, string(data))
-	}
-	var out SyncResponse
-	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -200,28 +205,7 @@ func (a *API) SyncBinary(ctx context.Context, since time.Time, items []Item) (*S
 
 // ListItems возвращает все записи с сервера.
 func (a *API) ListItems(ctx context.Context) ([]Item, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/api/v1/items", nil)
-	if err != nil {
-		return nil, err
-	}
-	a.setAuth(httpReq)
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", resp.Status, string(data))
-	}
-	var items []Item
-	if err := json.Unmarshal(data, &items); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return jsonRequest[[]Item](ctx, a, http.MethodGet, "/api/v1/items", nil, true)
 }
 
 func (a *API) setAuth(req *http.Request) {

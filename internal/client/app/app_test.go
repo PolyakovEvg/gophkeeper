@@ -205,15 +205,59 @@ func TestAppOTPCodeNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+// fakeSecretStore - in-memory реализация app.SecretStore для тестов,
+// не зависящая от наличия OS keychain на машине, где запускаются тесты.
+type fakeSecretStore struct {
+	tokens    map[string]string
+	passwords map[string]string
+}
+
+func newFakeSecretStore() *fakeSecretStore {
+	return &fakeSecretStore{tokens: map[string]string{}, passwords: map[string]string{}}
+}
+
+func (f *fakeSecretStore) SetToken(login, token string) error {
+	f.tokens[login] = token
+	return nil
+}
+
+func (f *fakeSecretStore) GetToken(login string) (string, error) {
+	token, ok := f.tokens[login]
+	if !ok {
+		return "", assert.AnError
+	}
+	return token, nil
+}
+
+func (f *fakeSecretStore) SetMasterPassword(login, password string) error {
+	f.passwords[login] = password
+	return nil
+}
+
+func (f *fakeSecretStore) GetMasterPassword(login string) (string, error) {
+	password, ok := f.passwords[login]
+	if !ok {
+		return "", assert.AnError
+	}
+	return password, nil
+}
+
+func (f *fakeSecretStore) ClearSession(login string) error {
+	delete(f.tokens, login)
+	delete(f.passwords, login)
+	return nil
+}
+
 func TestAppHasSession(t *testing.T) {
 	store, err := localstore.Open(filepath.Join(t.TempDir(), "c.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	application := app.New(client.New("http://localhost", nil), store, t.TempDir())
+	application := &app.App{API: client.New("http://localhost", nil), Store: store, DataDir: t.TempDir(), Keyring: newFakeSecretStore()}
 	assert.False(t, application.HasSession())
 
-	require.NoError(t, store.SetMeta("token", "test-token"))
+	require.NoError(t, store.SetMeta("login", "u"))
+	require.NoError(t, application.Keyring.SetToken("u", "test-token"))
 	assert.True(t, application.HasSession())
 }
 
@@ -226,15 +270,14 @@ func TestAppRestoreSessionWithPassword(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	application := app.New(client.New(server.URL, server.Client()), store, t.TempDir())
+	secrets := newFakeSecretStore()
+	application := &app.App{API: client.New(server.URL, server.Client()), Store: store, DataDir: t.TempDir(), Keyring: secrets}
 	ctx := context.Background()
 
 	require.NoError(t, application.Register(ctx, "restoreuser", "pass"))
-	require.NoError(t, application.Logout())
 
-	require.NoError(t, store.SetMeta("token", "test-token"))
-	require.NoError(t, store.SetMeta("login", "restoreuser"))
-
-	err = application.RestoreSessionWithPassword("newpass")
+	// Симулируем перезапуск процесса: новый App с тем же Store/Keyring, но пустым in-memory состоянием.
+	restarted := &app.App{API: client.New(server.URL, server.Client()), Store: store, DataDir: t.TempDir(), Keyring: secrets}
+	err = restarted.RestoreSessionWithPassword("newpass")
 	require.NoError(t, err)
 }

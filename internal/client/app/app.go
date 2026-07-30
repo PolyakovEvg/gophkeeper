@@ -19,12 +19,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// SecretStore абстрагирует защищённое хранилище сессионных секретов (обычно OS keychain).
+// Единственный источник истины для auth-токена и мастер-пароля.
+type SecretStore interface {
+	SetToken(login, token string) error
+	GetToken(login string) (string, error)
+	SetMasterPassword(login, password string) error
+	GetMasterPassword(login string) (string, error)
+	ClearSession(login string) error
+}
+
 // App - фасад клиентского приложения.
 type App struct {
 	API     *client.API
 	Store   *localstore.Store
 	DataDir string
-	Keyring *keyring.Keyring
+	Keyring SecretStore
 }
 
 // New создаёт приложение с указанным API и локальным хранилищем.
@@ -60,11 +70,11 @@ func (a *App) Login(ctx context.Context, login, password string) error {
 }
 
 func (a *App) persistSession(login, password string) error {
-	if err := a.Store.SetMeta("token", a.API.Token()); err != nil {
-		return err
-	}
 	if err := a.Store.SetMeta("login", login); err != nil {
 		return err
+	}
+	if err := a.Keyring.SetToken(login, a.API.Token()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to store token in keychain: %v\n", err)
 	}
 	if err := a.Keyring.SetMasterPassword(login, password); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to store password in keychain: %v\n", err)
@@ -72,17 +82,17 @@ func (a *App) persistSession(login, password string) error {
 	return nil
 }
 
-// RestoreSession восстанавливает сессию из локального хранилища и keychain.
+// RestoreSession восстанавливает сессию из keychain (токен и мастер-пароль).
 // Если пароль не найден в keychain, возвращает ошибку ErrPasswordRequired.
 var ErrPasswordRequired = fmt.Errorf("master password required")
 
 func (a *App) RestoreSession() error {
 	login, err := a.Store.GetMeta("login")
-	if err != nil {
+	if err != nil || login == "" {
 		return fmt.Errorf("not logged in: %w", err)
 	}
-	token, err := a.Store.GetMeta("token")
-	if err != nil {
+	token, err := a.Keyring.GetToken(login)
+	if err != nil || token == "" {
 		return fmt.Errorf("not logged in: %w", err)
 	}
 	password, err := a.Keyring.GetMasterPassword(login)
@@ -96,12 +106,12 @@ func (a *App) RestoreSession() error {
 
 // RestoreSessionWithPassword восстанавливает сессию с явно указанным паролем.
 func (a *App) RestoreSessionWithPassword(password string) error {
-	token, err := a.Store.GetMeta("token")
-	if err != nil {
+	login, err := a.Store.GetMeta("login")
+	if err != nil || login == "" {
 		return fmt.Errorf("not logged in: %w", err)
 	}
-	login, err := a.Store.GetMeta("login")
-	if err != nil {
+	token, err := a.Keyring.GetToken(login)
+	if err != nil || token == "" {
 		return fmt.Errorf("not logged in: %w", err)
 	}
 	a.API.SetToken(token)
@@ -112,9 +122,13 @@ func (a *App) RestoreSessionWithPassword(password string) error {
 	return nil
 }
 
-// HasSession проверяет, есть ли сохранённая сессия (токен).
+// HasSession проверяет, есть ли сохранённая сессия (токен в keychain).
 func (a *App) HasSession() bool {
-	token, err := a.Store.GetMeta("token")
+	login, err := a.Store.GetMeta("login")
+	if err != nil || login == "" {
+		return false
+	}
+	token, err := a.Keyring.GetToken(login)
 	return err == nil && token != ""
 }
 
@@ -179,15 +193,8 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 	if a.Store.Password() == "" {
 		return fmt.Errorf("master password not set - please login first")
 	}
-	token, err := a.Store.GetMeta("token")
-	if err != nil {
-		return fmt.Errorf("not logged in: %w", err)
-	}
-	a.API.SetToken(token)
-
-	dirty, err := a.Store.ListDirty()
-	if err != nil {
-		return err
+	if a.API.Token() == "" {
+		return fmt.Errorf("not logged in: please login first")
 	}
 
 	var since time.Time
@@ -195,9 +202,15 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		since, _ = time.Parse(time.RFC3339Nano, raw)
 	}
 
-	pushedVersions := make(map[uuid.UUID]int64, len(dirty))
-	wireItems := make([]client.Item, 0, len(dirty))
-	for _, it := range dirty {
+	// Записи читаются из локальной БД потоково (без буферизации всего dirty-набора
+	// в памяти) и сразу шифруются в исходящий wireItems.
+	pushedVersions := make(map[uuid.UUID]int64)
+	var dirtyIDs []uuid.UUID
+	var wireItems []client.Item
+	for it, err := range a.Store.ListDirtySeq() {
+		if err != nil {
+			return err
+		}
 		raw, err := json.Marshal(it.Payload)
 		if err != nil {
 			return err
@@ -207,12 +220,14 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 			return err
 		}
 		pushedVersions[it.ID] = it.Version
+		dirtyIDs = append(dirtyIDs, it.ID)
 		wireItems = append(wireItems, client.Item{
 			ID: it.ID.String(), Version: it.Version, UpdatedAt: it.UpdatedAt,
 			Deleted: it.Deleted, Payload: enc,
 		})
 	}
 
+	var err error
 	var resp *client.SyncResponse
 	if binary {
 		resp, err = a.API.SyncBinary(ctx, since, wireItems)
@@ -261,11 +276,11 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 		}
 	}
 
-	for _, it := range dirty {
-		if _, conflicted := conflicts[it.ID]; conflicted {
+	for _, id := range dirtyIDs {
+		if _, conflicted := conflicts[id]; conflicted {
 			continue
 		}
-		_ = a.Store.MarkClean(it.ID)
+		_ = a.Store.MarkClean(id)
 	}
 
 	if !incomplete {
@@ -282,10 +297,13 @@ func (a *App) Sync(ctx context.Context, binary bool) error {
 
 // Logout очищает сессию и разлогинивает пользователя.
 func (a *App) Logout() error {
+	login, _ := a.Store.GetMeta("login")
 	a.API.SetToken("")
 	a.Store.SetPassword("")
-	if err := a.Store.SetMeta("token", ""); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to clear token: %v\n", err)
+	if login != "" {
+		if err := a.Keyring.ClearSession(login); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to clear keychain session: %v\n", err)
+		}
 	}
 	if err := a.Store.SetMeta("login", ""); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to clear login: %v\n", err)

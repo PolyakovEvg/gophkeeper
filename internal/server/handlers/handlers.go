@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/PolyakovEvg/gophkeeper/internal/server/middleware"
 	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +36,7 @@ type VaultStorage interface {
 	UpsertItem(ctx context.Context, item *models.VaultItem) error
 	SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []models.VaultItem) ([]models.VaultItem, error)
 	ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]models.VaultItem, error)
-	ListAllItems(ctx context.Context, userID uuid.UUID) ([]models.VaultItem, error)
+	ListAllItemsSeq(ctx context.Context, userID uuid.UUID) iter.Seq2[models.VaultItem, error]
 	GetItem(ctx context.Context, userID, itemID uuid.UUID) (*models.VaultItem, error)
 }
 
@@ -60,27 +60,23 @@ func NewRouter(store Storage, authSvc *auth.Service, logger *slog.Logger) *Route
 
 // Routes возвращает http.Handler со всеми маршрутами.
 func (rt *Router) Routes() http.Handler {
-	r := chi.NewRouter()
+	mux := http.NewServeMux()
 
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
 
-	r.Route("/api/v1", func(r chi.Router) {
-		r.Post("/register", rt.Register)
-		r.Post("/login", rt.Login)
+	mux.HandleFunc("POST /api/v1/register", rt.Register)
+	mux.HandleFunc("POST /api/v1/login", rt.Login)
 
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.AuthMiddleware(rt.auth))
-			r.Get("/items", rt.ListItems)
-			r.Get("/items/{id}", rt.GetItem)
-			r.Post("/items", rt.UpsertItemJSON)
-			r.Post("/sync", rt.SyncJSON)
-			r.Post("/sync/binary", rt.SyncBinary)
-		})
-	})
+	authed := middleware.AuthMiddleware(rt.auth)
+	mux.Handle("GET /api/v1/items", authed(http.HandlerFunc(rt.ListItems)))
+	mux.Handle("GET /api/v1/items/{id}", authed(http.HandlerFunc(rt.GetItem)))
+	mux.Handle("POST /api/v1/items", authed(http.HandlerFunc(rt.UpsertItemJSON)))
+	mux.Handle("POST /api/v1/sync", authed(http.HandlerFunc(rt.SyncJSON)))
+	mux.Handle("POST /api/v1/sync/binary", authed(http.HandlerFunc(rt.SyncBinary)))
 
-	return r
+	return mux
 }
 
 type credentialsRequest struct {
@@ -207,24 +203,36 @@ func (rt *Router) UpsertItemJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ListItems возвращает все записи пользователя.
+// ListItems стримит записи пользователя в JSON-массиве прямо из строк БД,
+// не буферизуя их предварительно в памяти сервера целиком.
 func (rt *Router) ListItems(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserID(r.Context())
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	items, err := rt.store.ListAllItems(r.Context(), userID)
-	if err != nil {
-		rt.logger.Error("list items", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	enc := json.NewEncoder(w)
+	_, _ = io.WriteString(w, "[")
+	first := true
+	for item, err := range rt.store.ListAllItemsSeq(r.Context(), userID) {
+		if err != nil {
+			rt.logger.Error("list items", "error", err)
+			return
+		}
+		if !first {
+			_, _ = io.WriteString(w, ",")
+		}
+		first = false
+		if err := enc.Encode(vaultToDTO(item)); err != nil {
+			rt.logger.Error("encode item", "error", err)
+			return
+		}
 	}
-	out := make([]itemDTO, 0, len(items))
-	for _, it := range items {
-		out = append(out, vaultToDTO(it))
-	}
-	writeJSON(w, out)
+	_, _ = io.WriteString(w, "]")
 }
 
 // GetItem возвращает одну запись.
@@ -234,7 +242,7 @@ func (rt *Router) GetItem(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	itemID, err := uuid.Parse(chi.URLParam(r, "id"))
+	itemID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return

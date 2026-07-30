@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/PolyakovEvg/gophkeeper/internal/models"
@@ -161,17 +162,20 @@ WHERE vault_items.user_id = EXCLUDED.user_id
 	return nil
 }
 
-func listItemsSince(ctx context.Context, db execQuerier, userID uuid.UUID, since time.Time) ([]models.VaultItem, error) {
+func listItemsSinceSeq(ctx context.Context, db execQuerier, userID uuid.UUID, since time.Time) iter.Seq2[models.VaultItem, error] {
 	rows, err := db.Query(ctx, `
 SELECT id, user_id, version, updated_at, deleted, payload
 FROM vault_items
 WHERE user_id = $1 AND updated_at > $2
 ORDER BY updated_at ASC`, userID, since.UTC())
 	if err != nil {
-		return nil, fmt.Errorf("list items: %w", err)
+		return errSeq(fmt.Errorf("list items: %w", err))
 	}
-	defer rows.Close()
-	return scanItems(rows)
+	return scanItemsSeq(rows)
+}
+
+func listItemsSince(ctx context.Context, db execQuerier, userID uuid.UUID, since time.Time) ([]models.VaultItem, error) {
+	return collectItems(listItemsSinceSeq(ctx, db, userID, since))
 }
 
 // ListItemsSince возвращает записи пользователя, изменённые после since.
@@ -179,18 +183,23 @@ func (s *Storage) ListItemsSince(ctx context.Context, userID uuid.UUID, since ti
 	return listItemsSince(ctx, s.pool, userID, since)
 }
 
-// ListAllItems возвращает все записи пользователя.
-func (s *Storage) ListAllItems(ctx context.Context, userID uuid.UUID) ([]models.VaultItem, error) {
+// ListAllItemsSeq стримит все записи пользователя из БД, не буферизуя их в памяти:
+// строки читаются из pgx.Rows по мере того, как вызывающий код проходит по итератору.
+func (s *Storage) ListAllItemsSeq(ctx context.Context, userID uuid.UUID) iter.Seq2[models.VaultItem, error] {
 	rows, err := s.pool.Query(ctx, `
 SELECT id, user_id, version, updated_at, deleted, payload
 FROM vault_items
 WHERE user_id = $1
 ORDER BY updated_at ASC`, userID)
 	if err != nil {
-		return nil, fmt.Errorf("list all items: %w", err)
+		return errSeq(fmt.Errorf("list all items: %w", err))
 	}
-	defer rows.Close()
-	return scanItems(rows)
+	return scanItemsSeq(rows)
+}
+
+// ListAllItems возвращает все записи пользователя.
+func (s *Storage) ListAllItems(ctx context.Context, userID uuid.UUID) ([]models.VaultItem, error) {
+	return collectItems(s.ListAllItemsSeq(ctx, userID))
 }
 
 // GetItem возвращает запись по ID.
@@ -216,16 +225,43 @@ func (s *Storage) TruncateForTest(ctx context.Context) error {
 	return err
 }
 
-func scanItems(rows pgx.Rows) ([]models.VaultItem, error) {
+// scanItemsSeq стримит строки из rows по одной, закрывая rows, когда итерация
+// завершается (в том числе при досрочном break вызывающей стороной).
+func scanItemsSeq(rows pgx.Rows) iter.Seq2[models.VaultItem, error] {
+	return func(yield func(models.VaultItem, error) bool) {
+		defer rows.Close()
+		for rows.Next() {
+			var item models.VaultItem
+			if err := rows.Scan(&item.ID, &item.UserID, &item.Version, &item.UpdatedAt, &item.Deleted, &item.Payload); err != nil {
+				yield(models.VaultItem{}, fmt.Errorf("scan item: %w", err))
+				return
+			}
+			if !yield(item, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(models.VaultItem{}, err)
+		}
+	}
+}
+
+// errSeq возвращает итератор из одного элемента-ошибки.
+func errSeq(err error) iter.Seq2[models.VaultItem, error] {
+	return func(yield func(models.VaultItem, error) bool) {
+		yield(models.VaultItem{}, err)
+	}
+}
+
+func collectItems(seq iter.Seq2[models.VaultItem, error]) ([]models.VaultItem, error) {
 	var items []models.VaultItem
-	for rows.Next() {
-		var item models.VaultItem
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Version, &item.UpdatedAt, &item.Deleted, &item.Payload); err != nil {
-			return nil, fmt.Errorf("scan item: %w", err)
+	for item, err := range seq {
+		if err != nil {
+			return nil, err
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	return items, nil
 }
 
 func isUniqueViolation(err error) bool {
