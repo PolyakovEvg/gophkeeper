@@ -1,0 +1,409 @@
+// Package handlers реализует HTTP API сервера GophKeeper.
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"iter"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/PolyakovEvg/gophkeeper/internal/auth"
+	"github.com/PolyakovEvg/gophkeeper/internal/models"
+	"github.com/PolyakovEvg/gophkeeper/internal/protocol"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/middleware"
+	"github.com/PolyakovEvg/gophkeeper/internal/server/storage"
+
+	"github.com/google/uuid"
+)
+
+const (
+	maxJSONBodySize     = 32 << 20
+	maxSyncJSONBodySize = 32 << 20
+)
+
+// AuthStorage - хранилище для аутентификации.
+type AuthStorage interface {
+	CreateUser(ctx context.Context, login, passwordHash string) (uuid.UUID, error)
+	GetUserByLogin(ctx context.Context, login string) (*models.User, error)
+}
+
+// VaultStorage - хранилище записей сейфа.
+type VaultStorage interface {
+	UpsertItem(ctx context.Context, item *models.VaultItem) error
+	SyncItems(ctx context.Context, userID uuid.UUID, since time.Time, items []models.VaultItem) ([]models.VaultItem, error)
+	ListItemsSince(ctx context.Context, userID uuid.UUID, since time.Time) ([]models.VaultItem, error)
+	ListAllItemsSeq(ctx context.Context, userID uuid.UUID) iter.Seq2[models.VaultItem, error]
+	GetItem(ctx context.Context, userID, itemID uuid.UUID) (*models.VaultItem, error)
+}
+
+// Storage объединяет зависимости хендлеров.
+type Storage interface {
+	AuthStorage
+	VaultStorage
+}
+
+// Router связывает HTTP-маршруты.
+type Router struct {
+	store  Storage
+	auth   *auth.Service
+	logger *slog.Logger
+}
+
+// NewRouter создаёт роутер API.
+func NewRouter(store Storage, authSvc *auth.Service, logger *slog.Logger) *Router {
+	return &Router{store: store, auth: authSvc, logger: logger}
+}
+
+// Routes возвращает http.Handler со всеми маршрутами.
+func (rt *Router) Routes() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]string{"status": "ok"})
+	})
+
+	mux.HandleFunc("POST /api/v1/register", rt.Register)
+	mux.HandleFunc("POST /api/v1/login", rt.Login)
+
+	authed := middleware.AuthMiddleware(rt.auth)
+	mux.Handle("GET /api/v1/items", authed(http.HandlerFunc(rt.ListItems)))
+	mux.Handle("GET /api/v1/items/{id}", authed(http.HandlerFunc(rt.GetItem)))
+	mux.Handle("POST /api/v1/items", authed(http.HandlerFunc(rt.UpsertItemJSON)))
+	mux.Handle("POST /api/v1/sync", authed(http.HandlerFunc(rt.SyncJSON)))
+	mux.Handle("POST /api/v1/sync/binary", authed(http.HandlerFunc(rt.SyncBinary)))
+
+	return mux
+}
+
+type credentialsRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type tokenResponse struct {
+	Token string `json:"token"`
+}
+
+// Register регистрирует нового пользователя.
+func (rt *Router) Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+	var req credentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.Login == "" || req.Password == "" {
+		http.Error(w, "login and password required", http.StatusBadRequest)
+		return
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		rt.logger.Error("hash password", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	userID, err := rt.store.CreateUser(r.Context(), req.Login, hash)
+	if err != nil {
+		if errors.Is(err, storage.ErrUserExists) {
+			http.Error(w, "login already taken", http.StatusConflict)
+			return
+		}
+		rt.logger.Error("create user", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	token, err := rt.auth.GenerateToken(userID)
+	if err != nil {
+		rt.logger.Error("generate token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, tokenResponse{Token: token})
+}
+
+// Login аутентифицирует пользователя.
+func (rt *Router) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+	var req credentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	user, err := rt.store.GetUserByLogin(r.Context(), req.Login)
+	if err != nil {
+		auth.CheckDummyPassword(req.Password)
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	if !auth.CheckPassword(req.Password, user.PasswordHash) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := rt.auth.GenerateToken(user.ID)
+	if err != nil {
+		rt.logger.Error("generate token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, tokenResponse{Token: token})
+}
+
+type itemDTO struct {
+	ID        string    `json:"id"`
+	Version   int64     `json:"version"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Deleted   bool      `json:"deleted"`
+	Payload   []byte    `json:"payload"`
+}
+
+type syncRequestJSON struct {
+	Since time.Time `json:"since"`
+	Items []itemDTO `json:"items"`
+}
+
+type syncResponseJSON struct {
+	ServerTime time.Time `json:"server_time"`
+	Items      []itemDTO `json:"items"`
+}
+
+// UpsertItemJSON принимает одну запись (зашифрованный payload).
+func (rt *Router) UpsertItemJSON(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var dto itemDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	item, err := dtoToVault(userID, dto)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := rt.store.UpsertItem(r.Context(), item); err != nil {
+		rt.logger.Error("upsert item", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// ListItems стримит записи пользователя в JSON-массиве прямо из строк БД,
+// не буферизуя их предварительно в памяти сервера целиком.
+func (rt *Router) ListItems(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	enc := json.NewEncoder(w)
+	_, _ = io.WriteString(w, "[")
+	first := true
+	for item, err := range rt.store.ListAllItemsSeq(r.Context(), userID) {
+		if err != nil {
+			rt.logger.Error("list items", "error", err)
+			return
+		}
+		if !first {
+			_, _ = io.WriteString(w, ",")
+		}
+		first = false
+		if err := enc.Encode(vaultToDTO(item)); err != nil {
+			rt.logger.Error("encode item", "error", err)
+			return
+		}
+	}
+	_, _ = io.WriteString(w, "]")
+}
+
+// GetItem возвращает одну запись.
+func (rt *Router) GetItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	itemID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	item, err := rt.store.GetItem(r.Context(), userID, itemID)
+	if err != nil {
+		if errors.Is(err, storage.ErrItemNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		rt.logger.Error("get item", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, vaultToDTO(*item))
+}
+
+// SyncJSON выполняет двустороннюю синхронизацию в JSON.
+func (rt *Router) SyncJSON(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxSyncJSONBodySize)
+	var req syncRequestJSON
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	resp, err := rt.doSync(r, userID, req.Since, req.Items)
+	if err != nil {
+		rt.logger.Error("sync", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+// SyncBinary выполняет синхронизацию через gob-бинарный протокол.
+func (rt *Router) SyncBinary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		http.Error(w, "read body", http.StatusBadRequest)
+		return
+	}
+
+	var req protocol.SyncRequest
+	if err := protocol.Decode(body, &req); err != nil {
+		http.Error(w, "invalid binary payload", http.StatusBadRequest)
+		return
+	}
+
+	items := make([]itemDTO, 0, len(req.Items))
+	for _, e := range req.Items {
+		items = append(items, itemDTO{
+			ID:        e.ID.String(),
+			Version:   e.Version,
+			UpdatedAt: e.UpdatedAt,
+			Deleted:   e.Deleted,
+			Payload:   e.Payload,
+		})
+	}
+
+	respJSON, err := rt.doSync(r, userID, req.Since, items)
+	if err != nil {
+		rt.logger.Error("binary sync", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := protocol.SyncResponse{ServerTime: respJSON.ServerTime}
+	for _, it := range respJSON.Items {
+		id, err := uuid.Parse(it.ID)
+		if err != nil {
+			rt.logger.Warn("invalid item id in response", "id", it.ID, "error", err)
+			continue
+		}
+		resp.Items = append(resp.Items, protocol.ItemEnvelope{
+			ID: id, Version: it.Version, UpdatedAt: it.UpdatedAt, Deleted: it.Deleted, Payload: it.Payload,
+		})
+	}
+
+	data, err := protocol.Encode(resp)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (rt *Router) doSync(r *http.Request, userID uuid.UUID, since time.Time, items []itemDTO) (syncResponseJSON, error) {
+	incoming := make([]models.VaultItem, 0, len(items))
+	for _, dto := range items {
+		item, err := dtoToVault(userID, dto)
+		if err != nil {
+			rt.logger.Warn("invalid item in sync", "id", dto.ID, "error", err)
+			continue
+		}
+		incoming = append(incoming, *item)
+	}
+
+	serverItems, err := rt.store.SyncItems(r.Context(), userID, since, incoming)
+	if err != nil {
+		return syncResponseJSON{}, err
+	}
+
+	out := make([]itemDTO, 0, len(serverItems))
+	for _, it := range serverItems {
+		out = append(out, vaultToDTO(it))
+	}
+	return syncResponseJSON{ServerTime: time.Now().UTC(), Items: out}, nil
+}
+
+func dtoToVault(userID uuid.UUID, dto itemDTO) (*models.VaultItem, error) {
+	id, err := uuid.Parse(dto.ID)
+	if err != nil {
+		return nil, errors.New("invalid item id")
+	}
+	if len(dto.Payload) == 0 && !dto.Deleted {
+		return nil, errors.New("payload required")
+	}
+	updated := dto.UpdatedAt
+	if updated.IsZero() {
+		updated = time.Now().UTC()
+	}
+	version := dto.Version
+	if version == 0 {
+		version = 1
+	}
+	return &models.VaultItem{
+		ID:        id,
+		UserID:    userID,
+		Version:   version,
+		UpdatedAt: updated,
+		Deleted:   dto.Deleted,
+		Payload:   dto.Payload,
+	}, nil
+}
+
+func vaultToDTO(item models.VaultItem) itemDTO {
+	return itemDTO{
+		ID:        item.ID.String(),
+		Version:   item.Version,
+		UpdatedAt: item.UpdatedAt.UTC(),
+		Deleted:   item.Deleted,
+		Payload:   item.Payload,
+	}
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(v)
+}
